@@ -37,8 +37,6 @@ import app.gamenative.utils.BestConfigService
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.GameCompatibilityCache
 import app.gamenative.utils.GameCompatibilityService
-import app.gamenative.utils.GameMetadataManager
-import app.gamenative.utils.SteamGridDB
 import app.gamenative.utils.createPinnedShortcut
 import kotlinx.coroutines.CancellationException
 import com.winlator.container.ContainerData
@@ -128,6 +126,8 @@ abstract class BaseAppScreen {
                     compatibilityMessage = null
                     compatibilityColor = null
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Timber.tag("BaseAppScreen").e(e, "Failed to get compatibility from cache")
                 compatibilityMessage = null
