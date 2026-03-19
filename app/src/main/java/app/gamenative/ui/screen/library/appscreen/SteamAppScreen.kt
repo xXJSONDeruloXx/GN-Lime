@@ -58,6 +58,7 @@ import app.gamenative.ui.component.dialog.GameManagerDialog
 import app.gamenative.ui.screen.library.GameMigrationDialog
 import app.gamenative.ui.component.dialog.state.GameManagerDialogState
 import app.gamenative.ui.util.SnackbarManager
+import app.gamenative.ui.util.SteamSaveTransfer
 import app.gamenative.utils.ContainerUtils.getContainer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -736,6 +737,26 @@ class SteamAppScreen : BaseAppScreen() {
             AppOptionMenuType.ResetToDefaults,
             onClick = { showResetConfirmDialog = true },
         )
+    }
+
+    override fun supportsSaveTransfer(libraryItem: LibraryItem): Boolean {
+        return libraryItem.gameSource == app.gamenative.data.GameSource.STEAM
+    }
+
+    override suspend fun exportSaves(
+        context: Context,
+        libraryItem: LibraryItem,
+        uri: Uri,
+    ): Boolean {
+        return SteamSaveTransfer.exportSaves(context, libraryItem.gameId, uri)
+    }
+
+    override suspend fun importSaves(
+        context: Context,
+        libraryItem: LibraryItem,
+        uri: Uri,
+    ): Boolean {
+        return SteamSaveTransfer.importSaves(context, libraryItem.gameId, uri)
     }
 
     @Composable
