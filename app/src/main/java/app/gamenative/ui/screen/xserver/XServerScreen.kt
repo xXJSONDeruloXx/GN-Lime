@@ -9,12 +9,16 @@ import android.util.Log
 import android.view.Display
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.hardware.input.InputManager
+import android.view.InputDevice
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -84,6 +88,8 @@ import app.gamenative.service.epic.EpicService
 import app.gamenative.service.gog.GOGService
 import app.gamenative.ui.component.QuickMenu
 import app.gamenative.ui.component.QuickMenuAction
+import app.gamenative.ui.data.PerformanceHudConfig
+import app.gamenative.ui.data.PerformanceHudSize
 import app.gamenative.ui.data.XServerState
 import app.gamenative.ui.widget.PerformanceHudView
 import app.gamenative.utils.ContainerUtils
@@ -367,14 +373,123 @@ fun XServerScreen(
     var showQuickMenu by remember { mutableStateOf(false) }
     var hasPhysicalController by remember { mutableStateOf(false) }
     var keepPausedForEditor by remember { mutableStateOf(false) }
+    var hasPhysicalKeyboard by remember { mutableStateOf(false) }
+    var hasPhysicalMouse by remember { mutableStateOf(false) }
+    var hasInternalTouchpad by remember { mutableStateOf(false) }
+    var hasUpdatedScreenGamepad by remember { mutableStateOf(false) }
+    var isPerformanceHudEnabled by remember { mutableStateOf(PrefManager.showFps) }
+
+    fun loadPerformanceHudConfig(): PerformanceHudConfig {
+        return PerformanceHudConfig(
+            showFrameRate = PrefManager.performanceHudShowFrameRate,
+            showCpuUsage = PrefManager.performanceHudShowCpuUsage,
+            showGpuUsage = PrefManager.performanceHudShowGpuUsage,
+            showRamUsage = PrefManager.performanceHudShowRamUsage,
+            showBatteryLevel = PrefManager.performanceHudShowBatteryLevel,
+            showPowerDraw = PrefManager.performanceHudShowPowerDraw,
+            showBatteryRuntime = PrefManager.performanceHudShowBatteryRuntime,
+            showClockTime = PrefManager.performanceHudShowClockTime,
+            showCpuTemperature = PrefManager.performanceHudShowCpuTemperature,
+            showGpuTemperature = PrefManager.performanceHudShowGpuTemperature,
+            showFrameRateGraph = PrefManager.performanceHudShowFrameRateGraph,
+            showCpuUsageGraph = PrefManager.performanceHudShowCpuUsageGraph,
+            showGpuUsageGraph = PrefManager.performanceHudShowGpuUsageGraph,
+            backgroundOpacity = PrefManager.performanceHudBackgroundOpacity,
+            size = PerformanceHudSize.fromPrefValue(PrefManager.performanceHudSize),
+        )
+    }
+
+    var performanceHudConfig by remember { mutableStateOf(loadPerformanceHudConfig()) }
     var performanceHudView by remember { mutableStateOf<PerformanceHudView?>(null) }
     var performanceHudHost by remember { mutableStateOf<FrameLayout?>(null) }
+    var isDraggingPerformanceHud by remember { mutableStateOf(false) }
+    var isTrackingPerformanceHudTouch by remember { mutableStateOf(false) }
+    var performanceHudTouchDownRawX by remember { mutableStateOf(0f) }
+    var performanceHudTouchDownRawY by remember { mutableStateOf(0f) }
+    var performanceHudDragOffsetX by remember { mutableStateOf(0f) }
+    var performanceHudDragOffsetY by remember { mutableStateOf(0f) }
+    val performanceHudTouchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
+
+    fun persistPerformanceHudConfig(config: PerformanceHudConfig) {
+        PrefManager.performanceHudShowFrameRate = config.showFrameRate
+        PrefManager.performanceHudShowCpuUsage = config.showCpuUsage
+        PrefManager.performanceHudShowGpuUsage = config.showGpuUsage
+        PrefManager.performanceHudShowRamUsage = config.showRamUsage
+        PrefManager.performanceHudShowBatteryLevel = config.showBatteryLevel
+        PrefManager.performanceHudShowPowerDraw = config.showPowerDraw
+        PrefManager.performanceHudShowBatteryRuntime = config.showBatteryRuntime
+        PrefManager.performanceHudShowClockTime = config.showClockTime
+        PrefManager.performanceHudShowCpuTemperature = config.showCpuTemperature
+        PrefManager.performanceHudShowGpuTemperature = config.showGpuTemperature
+        PrefManager.performanceHudShowFrameRateGraph = config.showFrameRateGraph
+        PrefManager.performanceHudShowCpuUsageGraph = config.showCpuUsageGraph
+        PrefManager.performanceHudShowGpuUsageGraph = config.showGpuUsageGraph
+        PrefManager.performanceHudBackgroundOpacity = config.backgroundOpacity
+        PrefManager.performanceHudSize = config.size.prefValue
+    }
+
+    fun applyPerformanceHudConfig(config: PerformanceHudConfig) {
+        performanceHudConfig = config
+        persistPerformanceHudConfig(config)
+        performanceHudView?.setConfig(config)
+    }
+
+    fun restorePerformanceHudPosition() {
+        val host = performanceHudHost ?: return
+        val hud = performanceHudView ?: return
+        if (host.width <= 0 || host.height <= 0 || hud.width <= 0 || hud.height <= 0) return
+
+        val maxX = (host.width - hud.width).coerceAtLeast(0).toFloat()
+        val maxY = (host.height - hud.height).coerceAtLeast(0).toFloat()
+        val margin = 12 * context.resources.displayMetrics.density
+        val savedX = PrefManager.performanceHudXFraction
+        val savedY = PrefManager.performanceHudYFraction
+
+        hud.x = if (savedX in 0f..1f) maxX * savedX else margin.coerceAtMost(maxX)
+        hud.y = if (savedY in 0f..1f) maxY * savedY else margin.coerceAtMost(maxY)
+
+        PrefManager.performanceHudXFraction = if (maxX > 0f) hud.x / maxX else 0f
+        PrefManager.performanceHudYFraction = if (maxY > 0f) hud.y / maxY else 0f
+    }
+
+    fun movePerformanceHud(rawX: Float, rawY: Float, save: Boolean) {
+        val host = performanceHudHost ?: return
+        val hud = performanceHudView ?: return
+        if (host.width <= 0 || host.height <= 0 || hud.width <= 0 || hud.height <= 0) return
+
+        val hostLocation = IntArray(2)
+        host.getLocationOnScreen(hostLocation)
+        val maxX = (host.width - hud.width).coerceAtLeast(0).toFloat()
+        val maxY = (host.height - hud.height).coerceAtLeast(0).toFloat()
+
+        hud.x = (rawX - hostLocation[0] - performanceHudDragOffsetX).coerceIn(0f, maxX)
+        hud.y = (rawY - hostLocation[1] - performanceHudDragOffsetY).coerceIn(0f, maxY)
+
+        if (save) {
+            PrefManager.performanceHudXFraction = if (maxX > 0f) hud.x / maxX else 0f
+            PrefManager.performanceHudYFraction = if (maxY > 0f) hud.y / maxY else 0f
+        }
+    }
 
     fun removePerformanceHud() {
+        isDraggingPerformanceHud = false
+        isTrackingPerformanceHudTouch = false
         performanceHudView?.let { hud ->
             (hud.parent as? ViewGroup)?.removeView(hud)
         }
         performanceHudView = null
+    }
+
+    fun togglePerformanceHudLayout() {
+        val hud = performanceHudView ?: return
+        val compactMode = !hud.isCompactMode()
+        hud.setCompactMode(compactMode)
+        PrefManager.performanceHudCompactMode = compactMode
+        hud.post {
+            if (performanceHudView === hud && !isDraggingPerformanceHud) {
+                restorePerformanceHudPosition()
+            }
+        }
     }
 
     fun updatePerformanceHud(show: Boolean) {
@@ -387,23 +502,30 @@ fun XServerScreen(
         }
 
         val targetLayout = performanceHudHost ?: return
-        val margin = (12 * context.resources.displayMetrics.density).toInt()
-
-        val hud = PerformanceHudView(context) {
-            frameRating?.currentFPS ?: 0f
-        }
+        val hud = PerformanceHudView(
+            context = context,
+            fpsProvider = {
+                frameRating?.currentFPS ?: 0f
+            },
+            initialConfig = performanceHudConfig,
+            initialCompactMode = PrefManager.performanceHudCompactMode,
+        )
         val layoutParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
             FrameLayout.LayoutParams.WRAP_CONTENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            marginStart = margin
-            topMargin = margin
         }
 
         targetLayout.addView(hud, layoutParams)
-        hud.bringToFront()
         performanceHudView = hud
+        hud.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            if (!isDraggingPerformanceHud) restorePerformanceHudPosition()
+        }
+        targetLayout.post {
+            if (performanceHudView === hud) restorePerformanceHudPosition()
+        }
+        hud.bringToFront()
     }
 
     fun clearOverlayPauseState() {
@@ -523,6 +645,122 @@ fun XServerScreen(
                 synchronized(lock) {
                     pendingSnapshot = null
                 }
+            }
+        }
+    }
+
+    val tryCapturePointer: () -> Boolean = {
+        // Only recapture when we have a physical mouse plugged in (or internal touchpad),
+        // no menus are open and we're not in Touchscreen mode
+        if ((hasPhysicalMouse || hasInternalTouchpad) &&
+            !showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode &&
+            !container.isTouchscreenMode) {
+            PluviaApp.touchpadView?.postDelayed({
+                val view = PluviaApp.touchpadView
+                if (view != null) {
+                    view.requestFocus()
+                    view.requestPointerCapture()
+                }
+            }, 100)
+            true
+        } else {
+            false
+        }
+    }
+
+    fun scanForExternalDevices() {
+        val deviceIds = InputDevice.getDeviceIds()
+        hasPhysicalKeyboard = deviceIds.any { id ->
+            val device = InputDevice.getDevice(id) ?: return@any false
+            val isExternal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) device.isExternal else true
+            Keyboard.isKeyboardDevice(device) && !device.isVirtual && isExternal
+        }
+        hasPhysicalMouse = deviceIds.any { id ->
+            val device = InputDevice.getDevice(id) ?: return@any false
+            val isMouse = device.supportsSource(InputDevice.SOURCE_MOUSE) || device.supportsSource(InputDevice.SOURCE_MOUSE_RELATIVE) ||
+                          device.supportsSource(InputDevice.SOURCE_TOUCHPAD)
+            val isExternal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) device.isExternal else true
+            isMouse && !device.isVirtual && isExternal
+        }
+        val controllerManager = ControllerManager.getInstance()
+        controllerManager.scanForDevices()
+        hasPhysicalController = controllerManager.getDetectedDevices().isNotEmpty()
+
+        if (!hasInternalTouchpad && !hasPhysicalMouse && !hasPhysicalKeyboard && !hasPhysicalController &&
+            !container.isTouchscreenMode) {
+            val manager = PluviaApp.inputControlsManager
+            val profiles = manager?.getProfiles(false) ?: listOf()
+
+            if (profiles.isNotEmpty()) {
+                // Use current profile (custom or Profile 0)
+                val profileIdStr = container.getExtra("profileId", "0")
+                val profileId = profileIdStr.toIntOrNull() ?: 0
+                val targetProfile = if (profileId != 0) {
+                    manager?.getProfile(profileId)
+                } else {
+                    null
+                } ?: manager?.getProfile(0) ?: profiles.getOrNull(2) ?: profiles.first()
+
+                if (!showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode) {
+                    Timber.d("No external devices attached, showing on-screen controls")
+                    if (!areControlsVisible) {
+                        showInputControls(targetProfile, xServerView!!.getxServer().winHandler, container)
+                        areControlsVisible = true
+                    }
+
+                    PluviaApp.touchpadView?.postDelayed({
+                        val view = PluviaApp.touchpadView
+                        if (view != null) {
+                            // Delay technically not required for the function to work but this can
+                            // race against tryCapturePointer() and end up capturing after release
+                            // was already called
+                            view.releasePointerCapture()
+                        }
+                    }, 100)
+                }
+                hasUpdatedScreenGamepad = false
+            }
+        }
+    }
+
+    fun evaluateDevice(device: InputDevice) {
+        // Some devices advertise all its capabilities on onInputDeviceAdded callback
+        // but some can also do basic advertise on onInputDeviceAdded and only expand on onInputDeviceChanged
+        val isExternal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) device.isExternal else true
+        if (!device.isVirtual && isExternal) {
+            if (Keyboard.isKeyboardDevice(device)) {
+                hasPhysicalKeyboard = true
+                if (!showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode &&
+                    !container.isTouchscreenMode &&
+                    !hasUpdatedScreenGamepad) {
+                    hasUpdatedScreenGamepad = true
+
+                    hideInputControls()
+                    areControlsVisible = false
+                }
+            }
+            val isMouse = device.supportsSource(InputDevice.SOURCE_MOUSE) ||
+                    device.supportsSource(InputDevice.SOURCE_MOUSE_RELATIVE) ||
+                    device.supportsSource(InputDevice.SOURCE_TOUCHPAD)
+            if (isMouse) {
+                hasPhysicalMouse = true
+                if (!hasUpdatedScreenGamepad && tryCapturePointer()) {
+                    hasUpdatedScreenGamepad = true
+
+                    hideInputControls()
+                    areControlsVisible = false
+                }
+            }
+        }
+        val isGamepad = ExternalController.isGameController(device)
+        if (isGamepad) {
+            if (!showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode &&
+                !container.isTouchscreenMode &&
+                !hasUpdatedScreenGamepad) {
+                hasUpdatedScreenGamepad = true
+
+                hideInputControls()
+                areControlsVisible = false
             }
         }
     }
@@ -678,7 +916,9 @@ fun XServerScreen(
             }
 
             QuickMenuAction.PERFORMANCE_HUD -> {
-                val enabled = performanceHudView == null
+                val enabled = !isPerformanceHudEnabled
+                isPerformanceHudEnabled = enabled
+                PrefManager.showFps = enabled
                 updatePerformanceHud(enabled)
                 PostHog.capture(
                     event = "performance_hud_toggled",
@@ -734,8 +974,46 @@ fun XServerScreen(
         val controllerManager = ControllerManager.getInstance()
         controllerManager.scanForDevices()
         hasPhysicalController = controllerManager.getDetectedDevices().isNotEmpty()
+        PluviaApp.touchpadView?.postDelayed({
+            val view = PluviaApp.touchpadView
+            if (view != null) {
+                // Delay technically not required for the function to work but this can
+                // race against tryCapturePointer() and end up capturing after release
+                // was already called
+                view.releasePointerCapture()
+            }
+        }, 100)
 
         showQuickMenu = true
+    }
+
+    DisposableEffect(Unit) {
+        val inputManager = context.getSystemService(Context.INPUT_SERVICE) as InputManager
+
+        val deviceListener = object : InputManager.InputDeviceListener {
+            override fun onInputDeviceAdded(deviceId: Int) {
+                val device = InputDevice.getDevice(deviceId) ?: return
+                evaluateDevice(device)
+            }
+
+            override fun onInputDeviceRemoved(deviceId: Int) {
+                // Re-scan since we don't know which type was removed
+                scanForExternalDevices()
+            }
+
+            override fun onInputDeviceChanged(deviceId: Int) {
+                scanForExternalDevices()
+                val device = InputDevice.getDevice(deviceId) ?: return
+                evaluateDevice(device)
+            }
+        }
+
+        inputManager.registerInputDeviceListener(deviceListener, null)
+        scanForExternalDevices()
+
+        onDispose {
+            inputManager.unregisterInputDeviceListener(deviceListener)
+        }
     }
 
     DisposableEffect(container) {
@@ -781,8 +1059,8 @@ fun XServerScreen(
                     }
                     else -> false
                 }
-            } else if (showQuickMenu && isGamepad) {
-                // Let Compose focus system handle gamepad navigation/selection while menu is visible.
+            } else if ((showElementEditor || keepPausedForEditor || showQuickMenu || isEditMode) && (isGamepad || isKeyboard)) {
+                // Let Compose focus system handle keyboard and gamepad navigation/selection while menu is visible.
                 false
             } else {
                 var handled = false
@@ -801,7 +1079,7 @@ fun XServerScreen(
         val onMotionEvent: (AndroidEvent.MotionEvent) -> Boolean = {
             val isGamepad = ExternalController.isGameController(it.event?.device)
 
-            if (showQuickMenu && isGamepad) {
+            if ((showElementEditor || keepPausedForEditor || showQuickMenu || isEditMode) && isGamepad) {
                 // Let Compose consume any gamepad motion while menu is visible.
                 false
             } else {
@@ -812,8 +1090,23 @@ fun XServerScreen(
                     // Final fallback to WinHandler passthrough
                     if (!handled) handled = xServerView!!.getxServer().winHandler.onGenericMotionEvent(it.event)
                 }
-                if (!handled) {
-                    handled = PluviaApp.touchpadView?.onExternalMouseEvent(it.event) == true
+                if (PluviaApp.touchpadView?.hasPointerCapture() != true && !PluviaApp.isOverlayPaused) {
+                    if (it.event != null) {
+                        val device = it.event.device
+                        val isExternal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) device.isExternal else true
+                        if (device.supportsSource(InputDevice.SOURCE_TOUCHPAD) &&
+                            !isExternal) {
+                            // Samsung DeX Touchpad app
+                            hasInternalTouchpad = true
+                            if (!showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode &&
+                                !hasUpdatedScreenGamepad) {
+                                hasUpdatedScreenGamepad = true
+                                hideInputControls()
+                                areControlsVisible = false
+                            }
+                        }
+                        tryCapturePointer()
+                    }
                 }
                 handled
             }
@@ -903,8 +1196,82 @@ fun XServerScreen(
         AndroidView(
         modifier = Modifier
             .fillMaxSize()
-            .pointerHoverIcon(PointerIcon(0))
+            .pointerHoverIcon(PointerIcon.Default)
             .pointerInteropFilter { event ->
+                val hud = performanceHudView
+                if (hud != null) {
+                    when (event.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            if (hud.isShown && hud.width > 0 && hud.height > 0) {
+                                val hudLocation = IntArray(2)
+                                hud.getLocationOnScreen(hudLocation)
+                                val insideHud =
+                                    event.rawX >= hudLocation[0] &&
+                                        event.rawX <= hudLocation[0] + hud.width &&
+                                        event.rawY >= hudLocation[1] &&
+                                        event.rawY <= hudLocation[1] + hud.height
+                                if (insideHud) {
+                                    performanceHudTouchDownRawX = event.rawX
+                                    performanceHudTouchDownRawY = event.rawY
+                                    performanceHudDragOffsetX = event.rawX - hudLocation[0]
+                                    performanceHudDragOffsetY = event.rawY - hudLocation[1]
+                                    isTrackingPerformanceHudTouch = true
+                                    isDraggingPerformanceHud = false
+                                    return@pointerInteropFilter true
+                                }
+                            }
+                        }
+                        MotionEvent.ACTION_MOVE -> {
+                            if (isTrackingPerformanceHudTouch) {
+                                if (!isDraggingPerformanceHud) {
+                                    val deltaX = event.rawX - performanceHudTouchDownRawX
+                                    val deltaY = event.rawY - performanceHudTouchDownRawY
+                                    val distanceSquared = (deltaX * deltaX) + (deltaY * deltaY)
+                                    if (distanceSquared >= performanceHudTouchSlop * performanceHudTouchSlop) {
+                                        isDraggingPerformanceHud = true
+                                    }
+                                }
+                                if (isDraggingPerformanceHud) {
+                                    movePerformanceHud(event.rawX, event.rawY, save = false)
+                                    return@pointerInteropFilter true
+                                }
+                            }
+                        }
+                        MotionEvent.ACTION_POINTER_DOWN,
+                        MotionEvent.ACTION_POINTER_UP,
+                        -> {
+                            if (isTrackingPerformanceHudTouch || isDraggingPerformanceHud) {
+                                isTrackingPerformanceHudTouch = false
+                                isDraggingPerformanceHud = false
+                                return@pointerInteropFilter true
+                            }
+                        }
+                        MotionEvent.ACTION_UP -> {
+                            if (isTrackingPerformanceHudTouch) {
+                                if (isDraggingPerformanceHud) {
+                                    movePerformanceHud(event.rawX, event.rawY, save = true)
+                                } else {
+                                    hud.performClick()
+                                    togglePerformanceHudLayout()
+                                }
+                                isTrackingPerformanceHudTouch = false
+                                isDraggingPerformanceHud = false
+                                return@pointerInteropFilter true
+                            }
+                        }
+                        MotionEvent.ACTION_CANCEL -> {
+                            if (isTrackingPerformanceHudTouch || isDraggingPerformanceHud) {
+                                if (isDraggingPerformanceHud) {
+                                    movePerformanceHud(event.rawX, event.rawY, save = true)
+                                }
+                                isTrackingPerformanceHudTouch = false
+                                isDraggingPerformanceHud = false
+                                return@pointerInteropFilter true
+                            }
+                        }
+                    }
+                }
+
                 val overlayHandled = swapInputOverlay
                     ?.takeIf { it.visibility == View.VISIBLE }
                     ?.dispatchTouchEvent(event) == true
@@ -1394,10 +1761,12 @@ fun XServerScreen(
                         // Determine if controls should be shown based on priority:
                         // 1. If touchscreen mode is true → always hide
                         // 2. Else if physical controller detected → hide
-                        // 3. Else → show
+                        // 3. Else if physical mouse/keyboard detected → hide
+                        // 4. Else → show
                         val shouldShowControls = when {
                             container.isTouchscreenMode -> false
                             hasPhysicalController -> false
+                            hasPhysicalKeyboard || hasPhysicalMouse -> false
                             else -> true
                         }
 
@@ -1417,6 +1786,12 @@ fun XServerScreen(
             }
             frameRating = FrameRating(context)
             frameRating?.setVisibility(View.GONE)
+
+            if (isPerformanceHudEnabled) {
+                frameLayout.post {
+                    updatePerformanceHud(true)
+                }
+            }
 
             if (container.isDisableMouseInput){
                 PluviaApp.touchpadView?.setTouchscreenMouseDisabled(true);
@@ -1567,6 +1942,9 @@ fun XServerScreen(
             isVisible = showQuickMenu,
             onDismiss = dismissOverlayMenu,
             onItemSelected = onQuickMenuItemSelected,
+            isPerformanceHudEnabled = isPerformanceHudEnabled,
+            performanceHudConfig = performanceHudConfig,
+            onPerformanceHudConfigChanged = ::applyPerformanceHudConfig,
             hasPhysicalController = hasPhysicalController,
         )
 
