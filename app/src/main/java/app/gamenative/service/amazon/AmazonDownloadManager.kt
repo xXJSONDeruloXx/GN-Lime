@@ -55,7 +55,7 @@ class AmazonDownloadManager @Inject constructor(
             MarkerUtils.addMarker(installPath, Marker.DOWNLOAD_IN_PROGRESS_MARKER)
 
             // Mark as partial install in DB so Downloads screen can detect it
-            amazonManager.markAsPartialInstall(productId)
+            amazonManager.markAsPartialInstall(productId, installPath)
 
             // Helper to cleanup marker on early failure
             fun cleanupOnFailure() {

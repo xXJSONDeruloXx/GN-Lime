@@ -1,9 +1,10 @@
 package app.gamenative.ui.model
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import android.content.Context
 import app.gamenative.PluviaApp
+import app.gamenative.R
 import app.gamenative.data.GameSource
 import app.gamenative.data.LibraryItem
 import app.gamenative.db.dao.AmazonGameDao
@@ -18,12 +19,14 @@ import app.gamenative.service.epic.EpicConstants
 import app.gamenative.service.epic.EpicService
 import app.gamenative.service.gog.GOGConstants
 import app.gamenative.service.gog.GOGService
-import app.gamenative.utils.ContainerUtils
 import app.gamenative.ui.data.CancelConfirmation
 import app.gamenative.ui.data.DownloadItemState
+import app.gamenative.ui.data.DownloadItemStatus
 import app.gamenative.ui.data.DownloadsState
+import app.gamenative.utils.ContainerUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.util.LinkedHashMap
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
@@ -48,12 +51,17 @@ class DownloadsViewModel @Inject constructor(
     private val _state = MutableStateFlow(DownloadsState())
     val state: StateFlow<DownloadsState> = _state.asStateFlow()
 
-    // Cache game metadata to avoid repeated DB lookups
     private val gameNameCache = ConcurrentHashMap<String, String>()
     private val gameIconCache = ConcurrentHashMap<String, String>()
-
-    // Mutex to prevent concurrent pollDownloads() execution
     private val pollMutex = Mutex()
+
+    private val finishedDownloads = ConcurrentHashMap<String, DownloadItemState>()
+    private val pausedDownloads = ConcurrentHashMap.newKeySet<String>()
+    private val pendingCancelledDownloads = ConcurrentHashMap.newKeySet<String>()
+    private val recentFailureMessages = ConcurrentHashMap<String, String>()
+
+    @Volatile
+    private var lastTrackedDownloads: Map<String, DownloadItemState> = emptyMap()
 
     private val onDownloadStatusChanged: (AndroidEvent.DownloadStatusChanged) -> Unit = {
         viewModelScope.launch(Dispatchers.IO) { pollDownloads() }
@@ -75,23 +83,39 @@ class DownloadsViewModel @Inject constructor(
         super.onCleared()
     }
 
+    private fun downloadKey(gameSource: GameSource, appId: String): String = "${gameSource.name}_$appId"
+
+    private fun normalizeStatusMessage(message: String?): String? {
+        return message
+            ?.takeIf { it.isNotBlank() }
+            ?.takeIf { !it.equals("null", ignoreCase = true) }
+    }
+
+    private fun failureMessage(message: String?): String {
+        return normalizeStatusMessage(message) ?: appContext.getString(R.string.downloads_status_failed)
+    }
+
     private suspend fun getSteamMetadata(appId: Int): Pair<String, String> {
-        val key = "${GameSource.STEAM}_$appId"
+        val key = downloadKey(GameSource.STEAM, appId.toString())
         val cachedName = gameNameCache[key]
         val cachedIcon = gameIconCache[key]
         if (cachedName != null && cachedIcon != null) return Pair(cachedName, cachedIcon)
 
         val app = steamAppDao.findApp(appId)
         val name = cachedName ?: (app?.name ?: "Steam App $appId").also { gameNameCache[key] = it }
-        val icon = cachedIcon ?: (if (app != null && app.clientIconHash.isNotEmpty())
-            "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/${app.id}/${app.clientIconHash}.ico"
-        else "").also { gameIconCache[key] = it }
+        val icon = cachedIcon ?: (
+            if (app != null && app.clientIconHash.isNotEmpty()) {
+                "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/${app.id}/${app.clientIconHash}.ico"
+            } else {
+                ""
+            }
+            ).also { gameIconCache[key] = it }
 
         return Pair(name, icon)
     }
 
     private suspend fun getEpicMetadata(appId: Int): Pair<String, String> {
-        val key = "${GameSource.EPIC}_$appId"
+        val key = downloadKey(GameSource.EPIC, appId.toString())
         val cachedName = gameNameCache[key]
         val cachedIcon = gameIconCache[key]
         if (cachedName != null && cachedIcon != null) return Pair(cachedName, cachedIcon)
@@ -104,7 +128,7 @@ class DownloadsViewModel @Inject constructor(
     }
 
     private suspend fun getGOGMetadata(gameId: String): Pair<String, String> {
-        val key = "${GameSource.GOG}_$gameId"
+        val key = downloadKey(GameSource.GOG, gameId)
         val cachedName = gameNameCache[key]
         val cachedIcon = gameIconCache[key]
         if (cachedName != null && cachedIcon != null) return Pair(cachedName, cachedIcon)
@@ -117,7 +141,7 @@ class DownloadsViewModel @Inject constructor(
     }
 
     private suspend fun getAmazonMetadata(productId: String): Pair<String, String> {
-        val key = "${GameSource.AMAZON}_$productId"
+        val key = downloadKey(GameSource.AMAZON, productId)
         val cachedName = gameNameCache[key]
         val cachedIcon = gameIconCache[key]
         if (cachedName != null && cachedIcon != null) return Pair(cachedName, cachedIcon)
@@ -129,160 +153,231 @@ class DownloadsViewModel @Inject constructor(
         return Pair(name, icon)
     }
 
+    private fun buildActiveDownloadItem(
+        appId: String,
+        gameSource: GameSource,
+        gameName: String,
+        iconUrl: String,
+        info: app.gamenative.data.DownloadInfo,
+    ): DownloadItemState {
+        val key = downloadKey(gameSource, appId)
+        val rawProgress = info.getProgress()
+        val statusMessage = normalizeStatusMessage(info.getStatusMessageFlow().value)
+        val status = when {
+            rawProgress < 0f || statusMessage?.startsWith("Failed", ignoreCase = true) == true -> DownloadItemStatus.FAILED
+            info.isActive() -> DownloadItemStatus.DOWNLOADING
+            else -> DownloadItemStatus.PAUSED
+        }
+
+        if (status == DownloadItemStatus.DOWNLOADING) {
+            recentFailureMessages.remove(key)
+        } else if (status == DownloadItemStatus.FAILED) {
+            recentFailureMessages[key] = failureMessage(statusMessage)
+        }
+
+        val (downloaded, total) = info.getBytesProgress()
+        return DownloadItemState(
+            appId = appId,
+            gameSource = gameSource,
+            gameName = gameName,
+            iconUrl = iconUrl,
+            progress = rawProgress.takeIf { it >= 0f },
+            bytesDownloaded = downloaded.takeIf { total > 0L },
+            bytesTotal = total.takeIf { it > 0L },
+            etaMs = info.getEstimatedTimeRemaining(),
+            statusMessage = statusMessage,
+            isActive = info.isActive(),
+            isPartial = false,
+            downloadSpeedBytesPerSec = info.getCurrentDownloadSpeed(),
+            status = status,
+        )
+    }
+
+    private fun buildPartialDownloadItem(
+        appId: String,
+        gameSource: GameSource,
+        gameName: String,
+        iconUrl: String,
+    ): DownloadItemState {
+        val key = downloadKey(gameSource, appId)
+        val status = when {
+            pausedDownloads.contains(key) -> DownloadItemStatus.PAUSED
+            recentFailureMessages.containsKey(key) -> DownloadItemStatus.FAILED
+            else -> DownloadItemStatus.RESUMABLE
+        }
+        val statusMessage = when (status) {
+            DownloadItemStatus.PAUSED -> appContext.getString(R.string.downloads_status_paused)
+            DownloadItemStatus.FAILED -> recentFailureMessages[key] ?: appContext.getString(R.string.downloads_status_failed)
+            DownloadItemStatus.RESUMABLE -> appContext.getString(R.string.downloads_resume_available)
+            else -> null
+        }
+
+        return DownloadItemState(
+            appId = appId,
+            gameSource = gameSource,
+            gameName = gameName,
+            iconUrl = iconUrl,
+            progress = null,
+            bytesDownloaded = null,
+            bytesTotal = null,
+            etaMs = null,
+            statusMessage = statusMessage,
+            isActive = false,
+            isPartial = true,
+            downloadSpeedBytesPerSec = null,
+            status = status,
+        )
+    }
+
+    private suspend fun isInstalled(gameSource: GameSource, appId: String): Boolean {
+        return when (gameSource) {
+            GameSource.STEAM -> appId.toIntOrNull()?.let { SteamService.isAppInstalled(it) } ?: false
+            GameSource.EPIC -> appId.toIntOrNull()?.let { epicGameDao.getById(it)?.isInstalled == true } ?: false
+            GameSource.GOG -> gogGameDao.getById(appId)?.isInstalled == true
+            GameSource.AMAZON -> amazonGameDao.getByProductId(appId)?.isInstalled == true
+            GameSource.CUSTOM_GAME -> false
+        }
+    }
+
+    private fun sortDownloads(items: Collection<DownloadItemState>): LinkedHashMap<String, DownloadItemState> {
+        val sortedItems = items.sortedWith(
+            compareBy<DownloadItemState> { item ->
+                when {
+                    item.status == DownloadItemStatus.DOWNLOADING -> 0
+                    item.isPartial -> 1
+                    item.status == DownloadItemStatus.COMPLETED -> 2
+                    item.status == DownloadItemStatus.CANCELLED -> 3
+                    else -> 4
+                }
+            }
+                .thenByDescending { item -> if (item.isFinished) item.updatedAtMs else 0L }
+                .thenBy { item ->
+                    if (item.isFinished) {
+                        ""
+                    } else {
+                        item.gameName.lowercase()
+                    }
+                },
+        )
+
+        return LinkedHashMap<String, DownloadItemState>().apply {
+            sortedItems.forEach { item -> put(item.uniqueId, item) }
+        }
+    }
+
+    private fun trimFinishedDownloads(maxEntries: Int = 20) {
+        if (finishedDownloads.size <= maxEntries) return
+
+        finishedDownloads.values
+            .sortedByDescending { it.updatedAtMs }
+            .drop(maxEntries)
+            .forEach { item -> finishedDownloads.remove(item.uniqueId) }
+    }
+
     private suspend fun pollDownloads() {
         if (!pollMutex.tryLock()) return
         try {
-            val items = mutableMapOf<String, DownloadItemState>()
+            val liveDownloads = LinkedHashMap<String, DownloadItemState>()
 
-            // Steam downloads
             for ((appId, info) in SteamService.getActiveDownloads()) {
                 val (name, icon) = getSteamMetadata(appId)
-                val (downloaded, total) = info.getBytesProgress()
-                items[appId.toString()] = DownloadItemState(
-                    appId = appId.toString(),
-                    gameSource = GameSource.STEAM,
-                    gameName = name,
-                    iconUrl = icon,
-                    progress = info.getProgress(),
-                    bytesDownloaded = downloaded,
-                    bytesTotal = total,
-                    etaMs = info.getEstimatedTimeRemaining(),
-                    statusMessage = info.getStatusMessageFlow().value,
-                    isActive = info.isActive(),
-                    isPartial = false
-                )
+                val item = buildActiveDownloadItem(appId.toString(), GameSource.STEAM, name, icon, info)
+                liveDownloads[item.uniqueId] = item
             }
 
             for (appId in SteamService.getPartialDownloads()) {
-                if (items.containsKey(appId.toString())) continue
+                val appIdString = appId.toString()
+                val key = downloadKey(GameSource.STEAM, appIdString)
+                if (liveDownloads.containsKey(key)) continue
                 val (name, icon) = getSteamMetadata(appId)
-                items[appId.toString()] = DownloadItemState(
-                    appId = appId.toString(),
-                    gameSource = GameSource.STEAM,
-                    gameName = name,
-                    iconUrl = icon,
-                    progress = null,
-                    bytesDownloaded = null,
-                    bytesTotal = null,
-                    etaMs = null,
-                    statusMessage = null,
-                    isActive = null,
-                    isPartial = true
-                )
+                liveDownloads[key] = buildPartialDownloadItem(appIdString, GameSource.STEAM, name, icon)
             }
 
-            // Epic downloads
             for ((appId, info) in EpicService.getActiveDownloads()) {
                 val (name, icon) = getEpicMetadata(appId)
-                val (downloaded, total) = info.getBytesProgress()
-                items[appId.toString()] = DownloadItemState(
-                    appId = appId.toString(),
-                    gameSource = GameSource.EPIC,
-                    gameName = name,
-                    iconUrl = icon,
-                    progress = info.getProgress(),
-                    bytesDownloaded = downloaded,
-                    bytesTotal = total,
-                    etaMs = info.getEstimatedTimeRemaining(),
-                    statusMessage = info.getStatusMessageFlow().value,
-                    isActive = info.isActive(),
-                    isPartial = false
-                )
+                val item = buildActiveDownloadItem(appId.toString(), GameSource.EPIC, name, icon, info)
+                liveDownloads[item.uniqueId] = item
             }
 
             for (appId in EpicService.getPartialDownloads()) {
-                if (items.containsKey(appId.toString())) continue
+                val appIdString = appId.toString()
+                val key = downloadKey(GameSource.EPIC, appIdString)
+                if (liveDownloads.containsKey(key)) continue
                 val (name, icon) = getEpicMetadata(appId)
-                items[appId.toString()] = DownloadItemState(
-                    appId = appId.toString(),
-                    gameSource = GameSource.EPIC,
-                    gameName = name,
-                    iconUrl = icon,
-                    progress = null,
-                    bytesDownloaded = null,
-                    bytesTotal = null,
-                    etaMs = null,
-                    statusMessage = null,
-                    isActive = null,
-                    isPartial = true
-                )
+                liveDownloads[key] = buildPartialDownloadItem(appIdString, GameSource.EPIC, name, icon)
             }
 
-            // GOG downloads
             for ((gameId, info) in GOGService.getActiveDownloads()) {
                 val (name, icon) = getGOGMetadata(gameId)
-                val (downloaded, total) = info.getBytesProgress()
-                items[gameId] = DownloadItemState(
-                    appId = gameId,
-                    gameSource = GameSource.GOG,
-                    gameName = name,
-                    iconUrl = icon,
-                    progress = info.getProgress(),
-                    bytesDownloaded = downloaded,
-                    bytesTotal = total,
-                    etaMs = info.getEstimatedTimeRemaining(),
-                    statusMessage = info.getStatusMessageFlow().value,
-                    isActive = info.isActive(),
-                    isPartial = false
-                )
+                val item = buildActiveDownloadItem(gameId, GameSource.GOG, name, icon, info)
+                liveDownloads[item.uniqueId] = item
             }
 
             for (gameId in GOGService.getPartialDownloads()) {
-                if (items.containsKey(gameId)) continue
+                val key = downloadKey(GameSource.GOG, gameId)
+                if (liveDownloads.containsKey(key)) continue
                 val (name, icon) = getGOGMetadata(gameId)
-                items[gameId] = DownloadItemState(
-                    appId = gameId,
-                    gameSource = GameSource.GOG,
-                    gameName = name,
-                    iconUrl = icon,
-                    progress = null,
-                    bytesDownloaded = null,
-                    bytesTotal = null,
-                    etaMs = null,
-                    statusMessage = null,
-                    isActive = null,
-                    isPartial = true
-                )
+                liveDownloads[key] = buildPartialDownloadItem(gameId, GameSource.GOG, name, icon)
             }
 
-            // Amazon downloads
             for ((productId, info) in AmazonService.getActiveDownloads()) {
                 val (name, icon) = getAmazonMetadata(productId)
-                val (downloaded, total) = info.getBytesProgress()
-                items[productId] = DownloadItemState(
-                    appId = productId,
-                    gameSource = GameSource.AMAZON,
-                    gameName = name,
-                    iconUrl = icon,
-                    progress = info.getProgress(),
-                    bytesDownloaded = downloaded,
-                    bytesTotal = total,
-                    etaMs = info.getEstimatedTimeRemaining(),
-                    statusMessage = info.getStatusMessageFlow().value,
-                    isActive = info.isActive(),
-                    isPartial = false
-                )
+                val item = buildActiveDownloadItem(productId, GameSource.AMAZON, name, icon, info)
+                liveDownloads[item.uniqueId] = item
             }
 
             for (productId in AmazonService.getPartialDownloads(appContext)) {
-                if (items.containsKey(productId)) continue
+                val key = downloadKey(GameSource.AMAZON, productId)
+                if (liveDownloads.containsKey(key)) continue
                 val (name, icon) = getAmazonMetadata(productId)
-                items[productId] = DownloadItemState(
-                    appId = productId,
-                    gameSource = GameSource.AMAZON,
-                    gameName = name,
-                    iconUrl = icon,
-                    progress = null,
-                    bytesDownloaded = null,
-                    bytesTotal = null,
-                    etaMs = null,
-                    statusMessage = null,
-                    isActive = null,
-                    isPartial = true
-                )
+                liveDownloads[key] = buildPartialDownloadItem(productId, GameSource.AMAZON, name, icon)
             }
 
-            _state.update { it.copy(downloads = items) }
+            val disappearedKeys = lastTrackedDownloads.keys - liveDownloads.keys
+            for (key in disappearedKeys) {
+                val previousItem = lastTrackedDownloads[key] ?: continue
+                val finishedStatus = when {
+                    pendingCancelledDownloads.remove(key) -> DownloadItemStatus.CANCELLED
+                    isInstalled(previousItem.gameSource, previousItem.appId) -> DownloadItemStatus.COMPLETED
+                    else -> DownloadItemStatus.FAILED
+                }
+
+                val finishedMessage = when (finishedStatus) {
+                    DownloadItemStatus.COMPLETED -> appContext.getString(R.string.downloads_status_complete)
+                    DownloadItemStatus.CANCELLED -> appContext.getString(R.string.downloads_status_cancelled)
+                    DownloadItemStatus.FAILED -> recentFailureMessages[key] ?: appContext.getString(R.string.downloads_status_failed)
+                    else -> previousItem.statusMessage
+                }
+
+                finishedDownloads[key] = previousItem.copy(
+                    progress = if (finishedStatus == DownloadItemStatus.COMPLETED) 1f else previousItem.progress,
+                    bytesDownloaded = if (finishedStatus == DownloadItemStatus.COMPLETED) {
+                        previousItem.bytesTotal ?: previousItem.bytesDownloaded
+                    } else {
+                        previousItem.bytesDownloaded
+                    },
+                    etaMs = null,
+                    statusMessage = finishedMessage,
+                    isActive = false,
+                    isPartial = false,
+                    downloadSpeedBytesPerSec = null,
+                    status = finishedStatus,
+                    updatedAtMs = System.currentTimeMillis(),
+                )
+
+                pausedDownloads.remove(key)
+                if (finishedStatus != DownloadItemStatus.FAILED) {
+                    recentFailureMessages.remove(key)
+                }
+            }
+
+            liveDownloads.keys.forEach { key -> finishedDownloads.remove(key) }
+            trimFinishedDownloads()
+            lastTrackedDownloads = liveDownloads
+
+            _state.update {
+                it.copy(downloads = sortDownloads(liveDownloads.values + finishedDownloads.values))
+            }
         } catch (e: Exception) {
             Timber.tag("DownloadsViewModel").e(e, "Error polling downloads")
         } finally {
@@ -290,65 +385,115 @@ class DownloadsViewModel @Inject constructor(
         }
     }
 
-    fun onPauseDownload(appId: String, gameSource: GameSource) {
-        when (gameSource) {
+    fun onPauseDownload(item: DownloadItemState) {
+        if (!item.canPause) return
+
+        val key = item.uniqueId
+        pausedDownloads.add(key)
+        recentFailureMessages.remove(key)
+
+        when (item.gameSource) {
             GameSource.STEAM -> {
-                val id = appId.toIntOrNull() ?: return
+                val id = item.appId.toIntOrNull() ?: return
                 SteamService.getAppDownloadInfo(id)?.cancel()
             }
+
             GameSource.EPIC -> {
-                val id = appId.toIntOrNull() ?: return
+                val id = item.appId.toIntOrNull() ?: return
                 EpicService.cancelDownload(id)
             }
-            GameSource.GOG -> {
-                GOGService.cancelDownload(appId)
-            }
-            GameSource.AMAZON -> {
-                AmazonService.cancelDownload(appId)
-            }
-            else -> { /* no-op */ }
+
+            GameSource.GOG -> GOGService.cancelDownload(item.appId)
+            GameSource.AMAZON -> AmazonService.cancelDownload(item.appId)
+            GameSource.CUSTOM_GAME -> Unit
         }
     }
 
-    fun onResumeDownload(appId: String, gameSource: GameSource) {
+    fun onResumeDownload(item: DownloadItemState) {
+        if (!item.canResume) return
+
+        val key = item.uniqueId
+        pausedDownloads.remove(key)
+        pendingCancelledDownloads.remove(key)
+        recentFailureMessages.remove(key)
+        finishedDownloads.remove(key)
+
         viewModelScope.launch(Dispatchers.IO) {
-            when (gameSource) {
+            when (item.gameSource) {
                 GameSource.STEAM -> {
-                    val id = appId.toIntOrNull() ?: return@launch
+                    val id = item.appId.toIntOrNull() ?: return@launch
                     SteamService.downloadApp(id)
                 }
+
                 GameSource.GOG -> {
-                    val game = gogGameDao.getById(appId) ?: return@launch
-                    val installPath = GOGConstants.getGameInstallPath(game.title)
-                    val container = ContainerUtils.getOrCreateContainer(appContext, "${GameSource.GOG.name}_$appId")
+                    val game = gogGameDao.getById(item.appId) ?: return@launch
+                    val installPath = game.installPath.ifBlank { GOGConstants.getGameInstallPath(game.title) }
+                    val container = ContainerUtils.getOrCreateContainer(appContext, "${GameSource.GOG.name}_${item.appId}")
                     val language = ContainerUtils.toContainerData(container).language
-                    GOGService.downloadGame(appContext, appId, installPath, language)
+                    val result = GOGService.downloadGame(appContext, item.appId, installPath, language)
+                    result.exceptionOrNull()?.message?.let { recentFailureMessages[key] = it }
                 }
+
                 GameSource.EPIC -> {
-                    val id = appId.toIntOrNull() ?: return@launch
+                    val id = item.appId.toIntOrNull() ?: return@launch
                     val game = epicGameDao.getById(id) ?: return@launch
-                    val installPath = EpicConstants.getGameInstallPath(appContext, game.appName)
-                    val container = ContainerUtils.getOrCreateContainer(appContext, "${GameSource.EPIC.name}_$appId")
+                    val installPath = game.installPath.ifBlank {
+                        EpicConstants.getGameInstallPath(appContext, game.appName)
+                    }
+                    val container = ContainerUtils.getOrCreateContainer(appContext, "${GameSource.EPIC.name}_${item.appId}")
                     val language = ContainerUtils.toContainerData(container).language
-                    EpicService.downloadGame(appContext, id, emptyList(), installPath, language)
+                    val result = EpicService.downloadGame(appContext, id, emptyList(), installPath, language)
+                    result.exceptionOrNull()?.message?.let { recentFailureMessages[key] = it }
                 }
+
                 GameSource.AMAZON -> {
-                    val game = amazonGameDao.getByProductId(appId) ?: return@launch
-                    val installPath = AmazonConstants.getGameInstallPath(appContext, game.title)
-                    AmazonService.downloadGame(appContext, appId, installPath)
+                    val game = amazonGameDao.getByProductId(item.appId) ?: return@launch
+                    val installPath = game.installPath.ifBlank {
+                        AmazonConstants.getGameInstallPath(appContext, game.title)
+                    }
+                    val result = AmazonService.downloadGame(appContext, item.appId, installPath)
+                    result.exceptionOrNull()?.message?.let { recentFailureMessages[key] = it }
                 }
-                else -> { /* no-op */ }
+
+                GameSource.CUSTOM_GAME -> Unit
             }
         }
     }
 
-    fun onCancelDownload(appId: String, gameSource: GameSource) {
-        // Find the game name from current state for the confirmation dialog
-        val gameName = _state.value.downloads.values
-            .find { it.appId == appId && it.gameSource == gameSource }
-            ?.gameName ?: ""
+    fun onPauseAll() {
+        state.value.downloads.values
+            .filter { it.canPause }
+            .forEach(::onPauseDownload)
+    }
+
+    fun onResumeAll() {
+        state.value.downloads.values
+            .filter { it.canResume }
+            .forEach(::onResumeDownload)
+    }
+
+    fun onCancelAll() {
+        state.value.downloads.values
+            .filter { it.canCancel }
+            .forEach { item -> cancelDownloadNow(item.appId, item.gameSource, item.gameName) }
+    }
+
+    fun onClearFinished() {
+        finishedDownloads.clear()
         _state.update {
-            it.copy(cancelConfirmation = CancelConfirmation(appId, gameSource, gameName))
+            it.copy(downloads = sortDownloads(lastTrackedDownloads.values))
+        }
+    }
+
+    fun onCancelDownload(item: DownloadItemState) {
+        _state.update {
+            it.copy(
+                cancelConfirmation = CancelConfirmation(
+                    appId = item.appId,
+                    gameSource = item.gameSource,
+                    gameName = item.gameName,
+                ),
+            )
         }
     }
 
@@ -359,10 +504,18 @@ class DownloadsViewModel @Inject constructor(
     fun onConfirmCancel() {
         val confirmation = _state.value.cancelConfirmation ?: return
         _state.update { it.copy(cancelConfirmation = null) }
+        cancelDownloadNow(confirmation.appId, confirmation.gameSource, confirmation.gameName)
+    }
 
-        when (confirmation.gameSource) {
+    private fun cancelDownloadNow(appId: String, gameSource: GameSource, gameName: String) {
+        val key = downloadKey(gameSource, appId)
+        pendingCancelledDownloads.add(key)
+        pausedDownloads.remove(key)
+        recentFailureMessages.remove(key)
+
+        when (gameSource) {
             GameSource.STEAM -> {
-                val id = confirmation.appId.toIntOrNull() ?: return
+                val id = appId.toIntOrNull() ?: return
                 SteamService.getAppDownloadInfo(id)?.cancel()
                 viewModelScope.launch(Dispatchers.IO) {
                     SteamService.deleteApp(id)
@@ -370,37 +523,43 @@ class DownloadsViewModel @Inject constructor(
                     pollDownloads()
                 }
             }
+
             GameSource.EPIC -> {
-                val id = confirmation.appId.toIntOrNull() ?: return
+                val id = appId.toIntOrNull() ?: return
                 EpicService.cancelDownload(id)
                 viewModelScope.launch(Dispatchers.IO) {
                     EpicService.deleteGame(appContext, id)
                     pollDownloads()
                 }
             }
+
             GameSource.GOG -> {
-                GOGService.cancelDownload(confirmation.appId)
+                GOGService.cancelDownload(appId)
                 viewModelScope.launch(Dispatchers.IO) {
-                    val game = gogGameDao.getById(confirmation.appId)
+                    val game = gogGameDao.getById(appId)
                     if (game != null) {
-                        val libraryItem = LibraryItem(
-                            appId = confirmation.appId,
-                            name = game.title,
-                            gameSource = GameSource.GOG,
+                        GOGService.deleteGame(
+                            appContext,
+                            LibraryItem(
+                                appId = appId,
+                                name = game.title.ifBlank { gameName },
+                                gameSource = GameSource.GOG,
+                            ),
                         )
-                        GOGService.deleteGame(appContext, libraryItem)
                     }
                     pollDownloads()
                 }
             }
+
             GameSource.AMAZON -> {
-                AmazonService.cancelDownload(confirmation.appId)
+                AmazonService.cancelDownload(appId)
                 viewModelScope.launch(Dispatchers.IO) {
-                    AmazonService.deleteGame(appContext, confirmation.appId)
+                    AmazonService.deleteGame(appContext, appId)
                     pollDownloads()
                 }
             }
-            else -> { /* no-op */ }
+
+            GameSource.CUSTOM_GAME -> Unit
         }
     }
 }

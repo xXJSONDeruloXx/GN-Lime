@@ -379,6 +379,12 @@ class EpicService : Service() {
                 gameId = appId,
                 downloadingAppIds = CopyOnWriteArrayList<Int>(),
             )
+            downloadInfo.setPersistencePath(installPath)
+
+            val persistedBytes = downloadInfo.loadPersistedBytesDownloaded(installPath)
+            if (persistedBytes > 0L) {
+                downloadInfo.initializeBytesDownloaded(persistedBytes)
+            }
 
             instance.activeDownloads[appId] = downloadInfo
             downloadInfo.setActive(true)

@@ -190,6 +190,40 @@ data class DownloadInfo(
     }
 
     /**
+     * Returns the recent download speed in bytes per second, or null if there is
+     * not enough sample data yet.
+     */
+    fun getCurrentDownloadSpeed(windowSeconds: Int = 10): Long? {
+        if (!isActive) return null
+
+        val now = System.currentTimeMillis()
+        val cutoff = now - windowSeconds * 1000L
+        val samples = speedSamples.toTypedArray().filter { it.timeMs >= cutoff }.toList()
+        if (samples.size < 2) {
+            return emaSpeedBytesPerSec.takeIf { hasEmaSpeed && it > 0.0 }?.toLong()
+        }
+
+        val first = samples.first()
+        val last = samples.last()
+        val elapsedMs = last.timeMs - first.timeMs
+        if (elapsedMs <= 0L) {
+            return emaSpeedBytesPerSec.takeIf { hasEmaSpeed && it > 0.0 }?.toLong()
+        }
+
+        val bytesDelta = last.bytes - first.bytes
+        if (bytesDelta <= 0L) {
+            return emaSpeedBytesPerSec.takeIf { hasEmaSpeed && it > 0.0 }?.toLong()
+        }
+
+        val bytesPerSecond = bytesDelta.toDouble() / (elapsedMs.toDouble() / 1000.0)
+        if (bytesPerSecond <= 0.0 || bytesPerSecond.isNaN() || bytesPerSecond.isInfinite()) {
+            return emaSpeedBytesPerSec.takeIf { hasEmaSpeed && it > 0.0 }?.toLong()
+        }
+
+        return bytesPerSecond.toLong()
+    }
+
+    /**
      * Returns an ETA in milliseconds based on recent download speed, or null if
      * there is not enough information yet (e.g. just started) or download is inactive.
      */

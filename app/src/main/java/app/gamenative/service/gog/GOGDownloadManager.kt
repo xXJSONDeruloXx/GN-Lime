@@ -382,7 +382,12 @@ class GOGDownloadManager @Inject constructor(
             // Mark as partial install in DB so Downloads screen can detect it
             val currentGame = gogManager.getGameFromDbById(gameId)
             if (currentGame != null) {
-                gogManager.updateGame(currentGame.copy(partialInstall = true))
+                gogManager.updateGame(
+                    currentGame.copy(
+                        partialInstall = true,
+                        installPath = installPath.absolutePath,
+                    ),
+                )
             }
 
             downloadInfo.updateStatusMessage("Downloading chunks...")
@@ -507,6 +512,7 @@ class GOGDownloadManager @Inject constructor(
             if (game != null) {
                 val installSize = calculateDirectorySize(installPath)
                 gogManager.updateGame(game.copy(isInstalled = true, partialInstall = false, installPath = installPath.absolutePath, installSize = installSize))
+                downloadInfo.clearPersistedBytesDownloaded(installPath.absolutePath)
                 Timber.tag("GOG").i("Updated database: game marked as installed, size: ${installSize / 1_000_000} MB")
             } else {
                 Timber.tag("GOG").w("Game $gameId not found in database, skipping DB update")

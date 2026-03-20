@@ -84,7 +84,7 @@ class EpicDownloadManager @Inject constructor(
             MarkerUtils.addMarker(installPath, Marker.DOWNLOAD_IN_PROGRESS_MARKER)
 
             // Mark as partial install in DB so Downloads screen can detect it
-            epicManager.updateGame(game.copy(partialInstall = true))
+            epicManager.updateGame(game.copy(partialInstall = true, installPath = installPath))
 
             // Emit download started event so UI can attach progress listeners
             val gameId = game.id
@@ -366,6 +366,7 @@ class EpicDownloadManager @Inject constructor(
             downloadInfo.updateStatusMessage("Complete")
             // Ensure bytes-based progress shows 100% completion
             downloadInfo.updateBytesDownloaded(downloadInfo.getTotalExpectedBytes() - downloadInfo.getBytesDownloaded())
+            downloadInfo.clearPersistedBytesDownloaded(installPath)
             downloadInfo.setProgress(1.0f)
             downloadInfo.setActive(false)
             downloadInfo.emitProgressChange()

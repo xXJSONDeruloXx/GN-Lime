@@ -13,6 +13,8 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -37,8 +39,10 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -73,8 +77,10 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.gamenative.R
+import app.gamenative.data.GameSource
 import app.gamenative.ui.component.dialog.MessageDialog
 import app.gamenative.ui.data.DownloadItemState
+import app.gamenative.ui.data.DownloadItemStatus
 import app.gamenative.ui.data.DownloadsState
 import app.gamenative.ui.model.DownloadsViewModel
 import app.gamenative.ui.screen.settings.ContainerStorageManagerContent
@@ -149,15 +155,13 @@ fun HomeDownloadsScreen(
                 when (selectedSection) {
                     DownloadsSection.Downloads -> DownloadsContent(
                         state = state,
-                        onResumeDownload = { item ->
-                            viewModel.onResumeDownload(item.appId, item.gameSource)
-                        },
-                        onPauseDownload = { item ->
-                            viewModel.onPauseDownload(item.appId, item.gameSource)
-                        },
-                        onCancelDownload = { item ->
-                            viewModel.onCancelDownload(item.appId, item.gameSource)
-                        },
+                        onResumeDownload = viewModel::onResumeDownload,
+                        onPauseDownload = viewModel::onPauseDownload,
+                        onCancelDownload = viewModel::onCancelDownload,
+                        onPauseAll = viewModel::onPauseAll,
+                        onResumeAll = viewModel::onResumeAll,
+                        onCancelAll = viewModel::onCancelAll,
+                        onClearFinished = viewModel::onClearFinished,
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(20.dp),
@@ -347,14 +351,30 @@ private fun DownloadsSidebarItem(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DownloadsContent(
     state: DownloadsState,
     onResumeDownload: (DownloadItemState) -> Unit,
     onPauseDownload: (DownloadItemState) -> Unit,
     onCancelDownload: (DownloadItemState) -> Unit,
+    onPauseAll: () -> Unit,
+    onResumeAll: () -> Unit,
+    onCancelAll: () -> Unit,
+    onClearFinished: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val items = remember(state.downloads) { state.downloads.values.toList() }
+    val activeCount = remember(items) { items.count { it.canPause } }
+    val resumableCount = remember(items) { items.count { it.canResume } }
+    val finishedCount = remember(items) { items.count { it.isFinished } }
+    val hasCancelableItems = remember(items) { items.any { it.canCancel } }
+    val primaryActionLabel = if (activeCount > 0) {
+        stringResource(R.string.downloads_pause_all)
+    } else {
+        stringResource(R.string.downloads_resume_all)
+    }
+
     Column(
         modifier = modifier.fillMaxSize(),
     ) {
@@ -370,11 +390,58 @@ private fun DownloadsContent(
             color = PluviaTheme.colors.textMuted,
         )
 
+        if (items.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = stringResource(
+                    R.string.downloads_summary,
+                    activeCount,
+                    resumableCount,
+                    finishedCount,
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
         Spacer(modifier = Modifier.height(12.dp))
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
         Spacer(modifier = Modifier.height(16.dp))
 
-        if (state.downloads.isEmpty()) {
+        if (items.isNotEmpty()) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                DownloadsToolbarButton(
+                    text = primaryActionLabel,
+                    icon = if (activeCount > 0) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    onClick = if (activeCount > 0) onPauseAll else onResumeAll,
+                    enabled = activeCount > 0 || resumableCount > 0,
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                DownloadsToolbarButton(
+                    text = stringResource(R.string.downloads_cancel_all),
+                    icon = Icons.Default.Delete,
+                    onClick = onCancelAll,
+                    enabled = hasCancelableItems,
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                )
+                DownloadsToolbarButton(
+                    text = stringResource(R.string.downloads_clear_finished),
+                    icon = null,
+                    onClick = onClearFinished,
+                    enabled = finishedCount > 0,
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        if (items.isEmpty()) {
             EmptyDownloadsContent(modifier = Modifier.fillMaxSize())
         } else {
             LazyColumn(
@@ -383,8 +450,8 @@ private fun DownloadsContent(
                 contentPadding = PaddingValues(bottom = 24.dp),
             ) {
                 items(
-                    items = state.downloads.values.toList(),
-                    key = { "${it.gameSource}_${it.appId}" },
+                    items = items,
+                    key = { it.uniqueId },
                 ) { item ->
                     DownloadItemCard(
                         item = item,
@@ -395,6 +462,38 @@ private fun DownloadsContent(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DownloadsToolbarButton(
+    text: String,
+    icon: ImageVector?,
+    onClick: () -> Unit,
+    enabled: Boolean,
+    containerColor: Color,
+    contentColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    FilledTonalButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        colors = ButtonDefaults.filledTonalButtonColors(
+            containerColor = containerColor,
+            contentColor = contentColor,
+        ),
+    ) {
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+        }
+        Text(text = text)
     }
 }
 
@@ -478,6 +577,7 @@ private fun EmptyDownloadsContent(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DownloadItemCard(
     item: DownloadItemState,
@@ -486,7 +586,22 @@ private fun DownloadItemCard(
     onCancel: () -> Unit,
 ) {
     val context = LocalContext.current
-    val detailText = item.etaMs?.let(::formatEta) ?: item.statusMessage
+    val statusText = statusLabel(item.status)
+    val detailText = item.statusMessage?.takeIf { !it.equals(statusText, ignoreCase = true) }
+    val speedText = item.downloadSpeedBytesPerSec
+        ?.takeIf { it > 0L }
+        ?.let { speed -> "${Formatter.formatFileSize(context, speed)}/s" }
+    val etaText = item.etaMs?.let(::formatEta)
+    val progressColor = when (item.status) {
+        DownloadItemStatus.COMPLETED -> PluviaTheme.colors.accentSuccess
+        DownloadItemStatus.CANCELLED,
+        DownloadItemStatus.FAILED,
+        -> PluviaTheme.colors.accentDanger
+        DownloadItemStatus.PAUSED,
+        DownloadItemStatus.RESUMABLE,
+        -> PluviaTheme.colors.accentWarning
+        DownloadItemStatus.DOWNLOADING -> PluviaTheme.colors.statusDownloading
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -497,37 +612,41 @@ private fun DownloadItemCard(
     ) {
         val isPortrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
 
-        val actionButtons: @Composable () -> Unit = {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (item.isPartial) {
-                    DownloadActionButton(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = stringResource(R.string.resume_download),
-                        accentColor = PluviaTheme.colors.accentSuccess,
-                        onClick = onResume,
-                    )
-                } else {
-                    DownloadActionButton(
-                        imageVector = Icons.Default.Pause,
-                        contentDescription = stringResource(R.string.pause_download),
-                        accentColor = PluviaTheme.colors.accentWarning,
-                        onClick = onPause,
-                    )
-                }
+        val actionButtons: @Composable (() -> Unit) = {
+            if (item.canPause || item.canResume || item.canCancel) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (item.canResume) {
+                        DownloadActionButton(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = stringResource(R.string.resume_download),
+                            accentColor = PluviaTheme.colors.accentSuccess,
+                            onClick = onResume,
+                        )
+                    } else if (item.canPause) {
+                        DownloadActionButton(
+                            imageVector = Icons.Default.Pause,
+                            contentDescription = stringResource(R.string.pause_download),
+                            accentColor = PluviaTheme.colors.accentWarning,
+                            onClick = onPause,
+                        )
+                    }
 
-                DownloadActionButton(
-                    imageVector = Icons.Default.Delete,
-                    contentDescription = stringResource(R.string.delete),
-                    accentColor = PluviaTheme.colors.accentDanger,
-                    onClick = onCancel,
-                )
+                    if (item.canCancel) {
+                        DownloadActionButton(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = stringResource(R.string.delete),
+                            accentColor = PluviaTheme.colors.accentDanger,
+                            onClick = onCancel,
+                        )
+                    }
+                }
             }
         }
 
-        val infoContent: @Composable (Modifier) -> Unit = { modifier ->
-            Column(modifier = modifier) {
+        val infoContent: @Composable (Modifier) -> Unit = { infoModifier ->
+            Column(modifier = infoModifier) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -546,7 +665,7 @@ private fun DownloadItemCard(
                         Text(
                             text = "${(progress * 100).toInt()}%",
                             style = MaterialTheme.typography.labelMedium,
-                            color = PluviaTheme.colors.statusDownloading,
+                            color = progressColor,
                         )
                     }
                 }
@@ -559,50 +678,74 @@ private fun DownloadItemCard(
                             .fillMaxWidth()
                             .height(6.dp)
                             .clip(RoundedCornerShape(3.dp)),
-                        color = PluviaTheme.colors.statusDownloading,
+                        color = progressColor,
                         trackColor = MaterialTheme.colorScheme.surfaceVariant,
                     )
                 }
 
-                when {
-                    item.bytesTotal != null && item.bytesDownloaded != null -> {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            val bytesText = if (item.bytesTotal > 0) {
+                Spacer(modifier = Modifier.height(10.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    MetadataChip(
+                        text = sourceLabel(item.gameSource),
+                        containerColor = sourceContainerColor(item.gameSource),
+                        contentColor = sourceContentColor(item.gameSource),
+                    )
+                    MetadataChip(
+                        text = statusText,
+                        containerColor = statusContainerColor(item.status),
+                        contentColor = statusContentColor(item.status),
+                    )
+                }
+
+                if (item.bytesDownloaded != null || speedText != null || etaText != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        val bytesText = when {
+                            item.bytesDownloaded != null && item.bytesTotal != null && item.bytesTotal > 0L -> {
                                 "${Formatter.formatFileSize(context, item.bytesDownloaded)} / ${Formatter.formatFileSize(context, item.bytesTotal)}"
-                            } else {
-                                Formatter.formatFileSize(context, item.bytesDownloaded)
                             }
+                            item.bytesDownloaded != null -> Formatter.formatFileSize(context, item.bytesDownloaded)
+                            else -> null
+                        }
+                        if (bytesText != null) {
                             Text(
                                 text = bytesText,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                             )
+                        } else {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
 
-                            detailText?.let {
-                                Text(
-                                    text = it,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                                )
-                            }
+                        val secondaryDetails = listOfNotNull(speedText, etaText).joinToString(" • ")
+                        if (secondaryDetails.isNotBlank()) {
+                            Text(
+                                text = secondaryDetails,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                     }
+                }
 
-                    !detailText.isNullOrBlank() -> {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = detailText,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
+                if (!detailText.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = detailText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }
@@ -633,13 +776,14 @@ private fun DownloadItemCard(
                     infoContent(Modifier.weight(1f))
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    actionButtons()
+                if (item.canPause || item.canResume || item.canCancel) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        actionButtons()
+                    }
                 }
             }
         } else {
@@ -664,12 +808,93 @@ private fun DownloadItemCard(
 
                 infoContent(Modifier.weight(1f))
 
-                Spacer(modifier = Modifier.width(12.dp))
-
-                actionButtons()
+                if (item.canPause || item.canResume || item.canCancel) {
+                    Spacer(modifier = Modifier.width(12.dp))
+                    actionButtons()
+                }
             }
         }
     }
+}
+
+@Composable
+private fun MetadataChip(
+    text: String,
+    containerColor: Color,
+    contentColor: Color,
+) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = containerColor,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = contentColor,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+        )
+    }
+}
+
+@Composable
+private fun sourceLabel(gameSource: GameSource): String = when (gameSource) {
+    GameSource.STEAM -> stringResource(R.string.library_source_steam)
+    GameSource.GOG -> stringResource(R.string.tab_gog)
+    GameSource.EPIC -> stringResource(R.string.tab_epic)
+    GameSource.AMAZON -> stringResource(R.string.tab_amazon)
+    GameSource.CUSTOM_GAME -> stringResource(R.string.library_source_custom)
+}
+
+@Composable
+private fun statusLabel(status: DownloadItemStatus): String = when (status) {
+    DownloadItemStatus.DOWNLOADING -> stringResource(R.string.downloading)
+    DownloadItemStatus.PAUSED -> stringResource(R.string.downloads_status_paused)
+    DownloadItemStatus.RESUMABLE -> stringResource(R.string.downloads_resume_available)
+    DownloadItemStatus.COMPLETED -> stringResource(R.string.downloads_status_complete)
+    DownloadItemStatus.CANCELLED -> stringResource(R.string.downloads_status_cancelled)
+    DownloadItemStatus.FAILED -> stringResource(R.string.downloads_status_failed)
+}
+
+@Composable
+private fun sourceContainerColor(gameSource: GameSource): Color = when (gameSource) {
+    GameSource.STEAM -> MaterialTheme.colorScheme.primaryContainer
+    GameSource.GOG -> MaterialTheme.colorScheme.tertiaryContainer
+    GameSource.EPIC -> MaterialTheme.colorScheme.secondaryContainer
+    GameSource.AMAZON -> MaterialTheme.colorScheme.surfaceContainerHighest
+    GameSource.CUSTOM_GAME -> MaterialTheme.colorScheme.surfaceVariant
+}
+
+@Composable
+private fun sourceContentColor(gameSource: GameSource): Color = when (gameSource) {
+    GameSource.STEAM -> MaterialTheme.colorScheme.onPrimaryContainer
+    GameSource.GOG -> MaterialTheme.colorScheme.onTertiaryContainer
+    GameSource.EPIC -> MaterialTheme.colorScheme.onSecondaryContainer
+    GameSource.AMAZON -> MaterialTheme.colorScheme.onSurface
+    GameSource.CUSTOM_GAME -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+@Composable
+private fun statusContainerColor(status: DownloadItemStatus): Color = when (status) {
+    DownloadItemStatus.DOWNLOADING -> MaterialTheme.colorScheme.primaryContainer
+    DownloadItemStatus.PAUSED,
+    DownloadItemStatus.RESUMABLE,
+    -> MaterialTheme.colorScheme.secondaryContainer
+    DownloadItemStatus.COMPLETED -> MaterialTheme.colorScheme.tertiaryContainer
+    DownloadItemStatus.CANCELLED,
+    DownloadItemStatus.FAILED,
+    -> MaterialTheme.colorScheme.errorContainer
+}
+
+@Composable
+private fun statusContentColor(status: DownloadItemStatus): Color = when (status) {
+    DownloadItemStatus.DOWNLOADING -> MaterialTheme.colorScheme.onPrimaryContainer
+    DownloadItemStatus.PAUSED,
+    DownloadItemStatus.RESUMABLE,
+    -> MaterialTheme.colorScheme.onSecondaryContainer
+    DownloadItemStatus.COMPLETED -> MaterialTheme.colorScheme.onTertiaryContainer
+    DownloadItemStatus.CANCELLED,
+    DownloadItemStatus.FAILED,
+    -> MaterialTheme.colorScheme.onErrorContainer
 }
 
 @Composable

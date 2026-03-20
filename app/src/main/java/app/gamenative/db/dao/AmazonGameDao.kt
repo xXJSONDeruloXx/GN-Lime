@@ -35,8 +35,8 @@ interface AmazonGameDao {
     @Query("SELECT * FROM amazon_games WHERE partial_install = 1")
     suspend fun getPartialDownloads(): List<AmazonGame>
 
-    @Query("UPDATE amazon_games SET partial_install = 1 WHERE product_id = :productId")
-    suspend fun markAsPartialInstall(productId: String)
+    @Query("UPDATE amazon_games SET partial_install = 1, install_path = :installPath WHERE product_id = :productId")
+    suspend fun markAsPartialInstall(productId: String, installPath: String)
 
     @Query(
         "UPDATE amazon_games SET is_installed = 1, partial_install = 0, install_path = :path, install_size = :size, version_id = :versionId WHERE product_id = :productId",

@@ -304,6 +304,12 @@ class GOGService : Service() {
 
             // Create DownloadInfo for progress tracking
             val downloadInfo = DownloadInfo(jobCount = 1, gameId = 0, downloadingAppIds = CopyOnWriteArrayList<Int>())
+            downloadInfo.setPersistencePath(installPath)
+
+            val persistedBytes = downloadInfo.loadPersistedBytesDownloaded(installPath)
+            if (persistedBytes > 0L) {
+                downloadInfo.initializeBytesDownloaded(persistedBytes)
+            }
 
             // Track in activeDownloads first
             instance.activeDownloads[gameId] = downloadInfo
