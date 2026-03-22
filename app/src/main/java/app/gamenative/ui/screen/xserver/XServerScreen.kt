@@ -395,6 +395,8 @@ fun XServerScreen(
             showCpuUsageGraph = PrefManager.performanceHudShowCpuUsageGraph,
             showGpuUsageGraph = PrefManager.performanceHudShowGpuUsageGraph,
             backgroundOpacity = PrefManager.performanceHudBackgroundOpacity,
+            colorIntensity = PrefManager.performanceHudColorIntensity,
+            showTextOutline = PrefManager.performanceHudShowTextOutline,
             size = PerformanceHudSize.fromPrefValue(PrefManager.performanceHudSize),
         )
     }
@@ -425,6 +427,8 @@ fun XServerScreen(
         PrefManager.performanceHudShowCpuUsageGraph = config.showCpuUsageGraph
         PrefManager.performanceHudShowGpuUsageGraph = config.showGpuUsageGraph
         PrefManager.performanceHudBackgroundOpacity = config.backgroundOpacity
+        PrefManager.performanceHudColorIntensity = config.colorIntensity
+        PrefManager.performanceHudShowTextOutline = config.showTextOutline
         PrefManager.performanceHudSize = config.size.prefValue
     }
 
@@ -2544,7 +2548,7 @@ private fun setupXEnvironment(
 
     if (container != null) {
         try {
-            GameFixesRegistry.applyFor(context, appId)
+            GameFixesRegistry.applyFor(context, appId, container)
         } catch (e: Exception) {
             Timber.tag("GameFixes").w(e, "Game fixes failed before launch")
         }

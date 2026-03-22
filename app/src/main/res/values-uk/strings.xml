@@ -162,7 +162,8 @@
     <string name="game_not_installed_title">Гра не інстальована</string>
     <string name="game_not_installed_message">Гра %s не інстальована. Будь ласка, інсталюйте гру перед запуском.</string>
     <string name="intent_launch_failed">Не вдалося запустити гру: недійсний ярлик запуску</string>
-    <string name="intent_launch_steam_login_required">Для запуску цієї гри потрібен вхід у Steam</string>
+    <string name="intent_launch_steam_pending">Гра запуститься після підключення до Steam</string>
+    <string name="intent_launch_steam_login_failed">Помилка входу в Steam — запуск гри скасовано</string>
     <string name="game_executable_not_found_title">Неможливо запустити</string>
     <string name="game_executable_not_found">Виконуваний файл не вдалося вибрати автоматично. Вкажіть шлях до виконуваного файлу в налаштуваннях контейнера.</string>
     <string name="save_container_settings_title">Зберегти налаштування контейнера?</string>
@@ -230,6 +231,8 @@
     <string name="performance_hud_size_medium">M</string>
     <string name="performance_hud_size_large">L</string>
     <string name="performance_hud_background_opacity">Прозорість тла</string>
+    <string name="performance_hud_color_intensity">Інтенсивність кольору</string>
+    <string name="performance_hud_text_outline">Контур тексту</string>
     <string name="performance_hud_percentage_value">%1$d%%</string>
     <string name="performance_hud_metrics">Показані показники</string>
     <string name="performance_hud_metrics_description">Виберіть, які показники з’являтимуться в накладанні.</string>
