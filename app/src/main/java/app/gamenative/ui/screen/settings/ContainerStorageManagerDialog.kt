@@ -1,7 +1,10 @@
 package app.gamenative.ui.screen.settings
 
 import android.content.Context
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -378,33 +381,20 @@ fun ContainerStorageManagerContent(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = stringResource(R.string.settings_storage_manage_title),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = stringResource(R.string.settings_storage_manage_subtitle),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = PluviaTheme.colors.textMuted,
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = if (state.isLoading && !state.hasLoaded) {
-                        stringResource(R.string.container_storage_loading)
-                    } else {
-                        stringResource(
-                            R.string.container_storage_summary,
-                            state.entries.size,
-                            StorageUtils.formatBinarySize(inventorySummaryBytes(state.entries)),
-                        )
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(
+                text = if (state.isLoading && !state.hasLoaded) {
+                    stringResource(R.string.container_storage_loading)
+                } else {
+                    stringResource(
+                        R.string.container_storage_summary,
+                        state.entries.size,
+                        StorageUtils.formatBinarySize(inventorySummaryBytes(state.entries)),
+                    )
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
 
             if (onDismissRequest != null) {
                 IconButton(
@@ -419,7 +409,7 @@ fun ContainerStorageManagerContent(
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -696,13 +686,26 @@ private fun StorageActionButton(
     containerColor: androidx.compose.ui.graphics.Color,
     contentColor: androidx.compose.ui.graphics.Color,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val accentColor = PluviaTheme.colors.accentPurple
+
     FilledTonalButton(
         onClick = onClick,
         enabled = enabled,
         shape = RoundedCornerShape(16.dp),
+        interactionSource = interactionSource,
+        border = BorderStroke(
+            width = if (isFocused) 2.dp else 1.dp,
+            color = if (isFocused) {
+                accentColor.copy(alpha = 0.7f)
+            } else {
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+            },
+        ),
         colors = ButtonDefaults.filledTonalButtonColors(
-            containerColor = containerColor,
-            contentColor = contentColor,
+            containerColor = if (isFocused) accentColor.copy(alpha = 0.18f) else containerColor,
+            contentColor = if (isFocused) accentColor else contentColor,
         ),
     ) {
         Icon(

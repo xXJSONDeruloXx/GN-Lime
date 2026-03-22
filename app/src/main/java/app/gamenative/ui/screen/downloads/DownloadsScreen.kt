@@ -5,6 +5,7 @@ import android.text.format.Formatter
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
@@ -282,10 +283,7 @@ private fun DownloadsSidebarItem(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
-    val accentColor = when (section) {
-        DownloadsSection.Downloads -> PluviaTheme.colors.accentCyan
-        DownloadsSection.Storage -> PluviaTheme.colors.accentPurple
-    }
+    val accentColor = PluviaTheme.colors.accentPurple
     val isHighlighted = selected || isFocused
 
     Box(
@@ -379,32 +377,17 @@ private fun DownloadsContent(
         modifier = modifier.fillMaxSize(),
     ) {
         Text(
-            text = stringResource(R.string.settings_downloads_title),
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Text(
-            text = stringResource(R.string.downloads_overview_subtitle),
-            style = MaterialTheme.typography.bodySmall,
-            color = PluviaTheme.colors.textMuted,
+            text = stringResource(
+                R.string.downloads_summary,
+                activeCount,
+                resumableCount,
+                finishedCount,
+            ),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        if (items.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = stringResource(
-                    R.string.downloads_summary,
-                    activeCount,
-                    resumableCount,
-                    finishedCount,
-                ),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -475,14 +458,27 @@ private fun DownloadsToolbarButton(
     contentColor: Color,
     modifier: Modifier = Modifier,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val accentColor = PluviaTheme.colors.accentPurple
+
     FilledTonalButton(
         onClick = onClick,
         enabled = enabled,
         modifier = modifier,
         shape = RoundedCornerShape(16.dp),
+        interactionSource = interactionSource,
+        border = BorderStroke(
+            width = if (isFocused) 2.dp else 1.dp,
+            color = if (isFocused) {
+                accentColor.copy(alpha = 0.7f)
+            } else {
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+            },
+        ),
         colors = ButtonDefaults.filledTonalButtonColors(
-            containerColor = containerColor,
-            contentColor = contentColor,
+            containerColor = if (isFocused) accentColor.copy(alpha = 0.18f) else containerColor,
+            contentColor = if (isFocused) accentColor else contentColor,
         ),
     ) {
         if (icon != null) {
@@ -521,14 +517,14 @@ private fun BackButton(
             .clip(CircleShape)
             .background(
                 if (isFocused) {
-                    PluviaTheme.colors.accentCyan.copy(alpha = 0.2f)
+                    PluviaTheme.colors.accentPurple.copy(alpha = 0.2f)
                 } else {
                     PluviaTheme.colors.surfaceElevated
                 }
             )
             .then(
                 if (isFocused) {
-                    Modifier.border(2.dp, PluviaTheme.colors.accentCyan.copy(alpha = 0.6f), CircleShape)
+                    Modifier.border(2.dp, PluviaTheme.colors.accentPurple.copy(alpha = 0.6f), CircleShape)
                 } else {
                     Modifier.border(1.dp, PluviaTheme.colors.borderDefault.copy(alpha = 0.3f), CircleShape)
                 }
@@ -544,7 +540,7 @@ private fun BackButton(
         Icon(
             imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
             contentDescription = stringResource(R.string.back),
-            tint = if (isFocused) PluviaTheme.colors.accentCyan else Color.White.copy(alpha = 0.8f),
+            tint = if (isFocused) PluviaTheme.colors.accentPurple else Color.White.copy(alpha = 0.8f),
             modifier = Modifier.size(24.dp),
         )
     }
@@ -621,14 +617,12 @@ private fun DownloadItemCard(
                         DownloadActionButton(
                             imageVector = Icons.Default.PlayArrow,
                             contentDescription = stringResource(R.string.resume_download),
-                            accentColor = PluviaTheme.colors.accentSuccess,
                             onClick = onResume,
                         )
                     } else if (item.canPause) {
                         DownloadActionButton(
                             imageVector = Icons.Default.Pause,
                             contentDescription = stringResource(R.string.pause_download),
-                            accentColor = PluviaTheme.colors.accentWarning,
                             onClick = onPause,
                         )
                     }
@@ -637,7 +631,6 @@ private fun DownloadItemCard(
                         DownloadActionButton(
                             imageVector = Icons.Default.Delete,
                             contentDescription = stringResource(R.string.delete),
-                            accentColor = PluviaTheme.colors.accentDanger,
                             onClick = onCancel,
                         )
                     }
@@ -901,7 +894,6 @@ private fun statusContentColor(status: DownloadItemStatus): Color = when (status
 private fun DownloadActionButton(
     imageVector: ImageVector,
     contentDescription: String,
-    accentColor: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -915,6 +907,7 @@ private fun DownloadActionButton(
         ),
         label = "downloadActionButtonScale",
     )
+    val accentColor = PluviaTheme.colors.accentPurple
 
     Box(
         modifier = modifier
