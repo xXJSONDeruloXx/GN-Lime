@@ -12,6 +12,7 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.security.MessageDigest
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -328,13 +329,14 @@ object SteamSaveTransfer {
 
     private fun patternRootId(pattern: SaveFilePattern): String {
         val root = pattern.root.name.lowercase()
-        val path = pattern.path
+        val normalizedPath = pattern.path
             .replace('\\', '/')
-            .replace('/', '_')
-            .replace(' ', '_')
             .ifBlank { "root" }
             .lowercase()
-        return "$root-$path"
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest("$root:$normalizedPath".toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        return "$root-$digest"
     }
 
     private fun SaveRoot.effectiveRootId(): String? {
