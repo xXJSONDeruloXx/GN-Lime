@@ -26,12 +26,19 @@ import kotlinx.serialization.json.Json
 import timber.log.Timber
 
 object SteamSaveTransfer {
+    private const val ARCHIVE_VERSION = 2
     private const val MANIFEST_ENTRY = "manifest.json"
-    private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
+    private const val STEAM_USERDATA_ROOT_ID = "steam-userdata"
+    private val json = Json {
+        prettyPrint = true
+        ignoreUnknownKeys = true
+        encodeDefaults = false
+        explicitNulls = false
+    }
 
     @Serializable
     private data class SaveArchiveManifest(
-        val version: Int = 1,
+        val version: Int = ARCHIVE_VERSION,
         val steamAppId: Int,
         val gameName: String,
         val exportedAt: Long,
@@ -40,14 +47,19 @@ object SteamSaveTransfer {
 
     @Serializable
     private data class SaveRoot(
-        val archiveRoot: String,
-        val absolutePath: String,
+        val rootId: String? = null,
+        val archiveRoot: String? = null,
     )
 
     private data class ResolvedSaveRoot(
-        val archiveRoot: String,
+        val rootId: String,
         val absolutePath: Path,
         val files: List<Path>,
+    )
+
+    private data class MutableResolvedSaveRoot(
+        var absolutePath: Path,
+        val files: MutableSet<Path>,
     )
 
     suspend fun exportSaves(
@@ -72,12 +84,7 @@ object SteamSaveTransfer {
                             steamAppId = steamAppId,
                             gameName = app.name,
                             exportedAt = System.currentTimeMillis(),
-                            roots = roots.map {
-                                SaveRoot(
-                                    archiveRoot = it.archiveRoot,
-                                    absolutePath = it.absolutePath.toString(),
-                                )
-                            },
+                            roots = roots.map { SaveRoot(rootId = it.rootId) },
                         )
 
                         zip.putNextEntry(ZipEntry(MANIFEST_ENTRY))
@@ -88,7 +95,7 @@ object SteamSaveTransfer {
                             root.files.forEach { file ->
                                 if (!Files.isRegularFile(file)) return@forEach
                                 val relativePath = root.absolutePath.relativize(file).toString().replace('\\', '/')
-                                zip.putNextEntry(ZipEntry("files/${root.archiveRoot}/$relativePath"))
+                                zip.putNextEntry(ZipEntry("files/${root.rootId}/$relativePath"))
                                 file.inputStream().use { it.copyTo(zip) }
                                 zip.closeEntry()
                             }
@@ -121,10 +128,20 @@ object SteamSaveTransfer {
                 throw IOException("Archive is for Steam app ${archiveManifest.steamAppId}, expected $steamAppId")
             }
 
-            val rootMap = withContext(Dispatchers.IO) {
-                resolveImportRoots(context, app).associateBy { it.archiveRoot }
+            val archiveRootIds = archiveManifest.roots.mapNotNull { it.effectiveRootId() }.toSet()
+            if (archiveRootIds.isEmpty()) {
+                throw IOException("Archive does not declare any save roots")
             }
 
+            val rootMap = withContext(Dispatchers.IO) {
+                resolveImportRoots(context, app).associateBy { it.rootId }
+            }
+            val unresolvedRootIds = archiveRootIds - rootMap.keys
+            if (unresolvedRootIds.isNotEmpty()) {
+                throw IOException("Archive save roots not available: ${unresolvedRootIds.joinToString()}")
+            }
+
+            var importedFileCount = 0
             withContext(Dispatchers.IO) {
                 context.contentResolver.openInputStream(uri)?.use { inputStream ->
                     ZipInputStream(inputStream.buffered()).use { zip ->
@@ -134,13 +151,19 @@ object SteamSaveTransfer {
                                 if (entry.isDirectory || entry.name == MANIFEST_ENTRY || !entry.name.startsWith("files/")) {
                                     continue
                                 }
-                                writeArchiveEntry(zip, entry.name, rootMap)
+                                if (writeArchiveEntry(zip, entry.name, archiveRootIds, rootMap)) {
+                                    importedFileCount += 1
+                                }
                             } finally {
                                 zip.closeEntry()
                             }
                         }
                     }
                 } ?: throw IOException("Unable to open archive")
+            }
+
+            if (importedFileCount == 0) {
+                throw IOException("No save files found in archive")
             }
 
             SnackbarManager.show(context.getString(R.string.steam_save_import_success))
@@ -179,17 +202,22 @@ object SteamSaveTransfer {
     private fun writeArchiveEntry(
         zip: ZipInputStream,
         entryName: String,
+        declaredRootIds: Set<String>,
         rootMap: Map<String, ResolvedSaveRoot>,
-    ) {
+    ): Boolean {
         val relativeEntry = entryName.removePrefix("files/").replace('\\', '/')
         val slashIndex = relativeEntry.indexOf('/')
-        if (slashIndex <= 0) return
+        if (slashIndex <= 0) return false
 
-        val archiveRoot = relativeEntry.substring(0, slashIndex)
+        val rootId = relativeEntry.substring(0, slashIndex)
         val relativePath = relativeEntry.substring(slashIndex + 1)
-        if (relativePath.isBlank()) return
+        if (relativePath.isBlank()) return false
+        if (rootId !in declaredRootIds) {
+            throw IOException("Archive entry missing from manifest: $entryName")
+        }
 
-        val destinationRoot = rootMap[archiveRoot]?.absolutePath ?: return
+        val destinationRoot = rootMap[rootId]?.absolutePath
+            ?: throw IOException("Archive save root not available: $rootId")
         val normalizedRoot = destinationRoot.normalize()
         val destination = normalizedRoot.resolve(relativePath).normalize()
         if (!destination.startsWith(normalizedRoot)) {
@@ -200,6 +228,7 @@ object SteamSaveTransfer {
         Files.newOutputStream(destination).use { output ->
             zip.copyTo(output)
         }
+        return true
     }
 
     private fun resolveExportRoots(
@@ -228,7 +257,7 @@ object SteamSaveTransfer {
                 .toList()
             return listOfNotNull(
                 createResolvedRoot(
-                    archiveRoot = "steam-userdata",
+                    rootId = STEAM_USERDATA_ROOT_ID,
                     basePath = basePath,
                     files = files,
                     includeEmptyRoot = includeEmptyRoots,
@@ -236,13 +265,27 @@ object SteamSaveTransfer {
             )
         }
 
-        return savePatterns.mapIndexedNotNull { index, pattern ->
+        val mergedRoots = LinkedHashMap<String, MutableResolvedSaveRoot>()
+        savePatterns.forEach { pattern ->
+            val rootId = patternRootId(pattern)
             val basePath = Paths.get(pattern.root.toAbsPath(context, app.id, accountId), pattern.substitutedPath)
             val files = findPatternFiles(basePath, pattern)
+            val existing = mergedRoots[rootId]
+            if (existing == null) {
+                mergedRoots[rootId] = MutableResolvedSaveRoot(basePath, files.toMutableSet())
+            } else {
+                if (!existing.absolutePath.exists() && basePath.exists()) {
+                    existing.absolutePath = basePath
+                }
+                existing.files.addAll(files)
+            }
+        }
+
+        return mergedRoots.mapNotNull { (rootId, root) ->
             createResolvedRoot(
-                archiveRoot = patternArchiveRoot(pattern, index),
-                basePath = basePath,
-                files = files,
+                rootId = rootId,
+                basePath = root.absolutePath,
+                files = root.files.toList(),
                 includeEmptyRoot = includeEmptyRoots,
             )
         }
@@ -257,7 +300,7 @@ object SteamSaveTransfer {
     }
 
     private fun createResolvedRoot(
-        archiveRoot: String,
+        rootId: String,
         basePath: Path,
         files: List<Path>,
         includeEmptyRoot: Boolean,
@@ -266,7 +309,7 @@ object SteamSaveTransfer {
         if (!basePath.exists()) {
             return if (includeEmptyRoot) {
                 ResolvedSaveRoot(
-                    archiveRoot = archiveRoot,
+                    rootId = rootId,
                     absolutePath = basePath,
                     files = emptyList(),
                 )
@@ -277,19 +320,25 @@ object SteamSaveTransfer {
 
         if (!includeEmptyRoot && distinctFiles.isEmpty()) return null
         return ResolvedSaveRoot(
-            archiveRoot = archiveRoot,
+            rootId = rootId,
             absolutePath = basePath,
             files = distinctFiles,
         )
     }
 
-    private fun patternArchiveRoot(pattern: SaveFilePattern, index: Int): String {
+    private fun patternRootId(pattern: SaveFilePattern): String {
         val root = pattern.root.name.lowercase()
-        val path = pattern.substitutedPath
+        val path = pattern.path
             .replace('\\', '/')
             .replace('/', '_')
             .replace(' ', '_')
             .ifBlank { "root" }
-        return "$index-$root-$path"
+            .lowercase()
+        return "$root-$path"
+    }
+
+    private fun SaveRoot.effectiveRootId(): String? {
+        return rootId?.takeIf { it.isNotBlank() }
+            ?: archiveRoot?.takeIf { it.isNotBlank() }
     }
 }
