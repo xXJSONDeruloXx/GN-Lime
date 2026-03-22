@@ -743,11 +743,20 @@ class SteamAppScreen : BaseAppScreen() {
         return libraryItem.gameSource == app.gamenative.data.GameSource.STEAM
     }
 
+    private suspend fun activateSaveTransferContainer(context: Context, appId: String) {
+        withContext(Dispatchers.IO) {
+            val containerManager = ContainerManager(context)
+            val container = ContainerUtils.getOrCreateContainer(context, appId)
+            containerManager.activateContainer(container)
+        }
+    }
+
     override suspend fun exportSaves(
         context: Context,
         libraryItem: LibraryItem,
         uri: Uri,
     ): Boolean {
+        activateSaveTransferContainer(context, libraryItem.appId)
         return SteamSaveTransfer.exportSaves(context, libraryItem.gameId, uri)
     }
 
@@ -756,6 +765,7 @@ class SteamAppScreen : BaseAppScreen() {
         libraryItem: LibraryItem,
         uri: Uri,
     ): Boolean {
+        activateSaveTransferContainer(context, libraryItem.appId)
         return SteamSaveTransfer.importSaves(context, libraryItem.gameId, uri)
     }
 

@@ -886,7 +886,13 @@ abstract class BaseAppScreen {
 
         LaunchedEffect(importSavesRequested) {
             if (importSavesRequested) {
-                importSavesLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
+                importSavesLauncher.launch(
+                    arrayOf(
+                        "application/zip",
+                        "application/x-zip-compressed",
+                        "application/octet-stream",
+                    ),
+                )
             }
         }
 
