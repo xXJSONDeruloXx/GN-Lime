@@ -132,6 +132,7 @@ class ContainerConfigState(
     val getStartupSelectionOptions: () -> List<String>,
     val launchFolderPicker: () -> Unit,
     val launchBackdropImagePicker: () -> Unit,
+    val clearBackdropImage: () -> Unit,
     val getVersionsForDriver: () -> List<String>,
     val getVersionsForBox64: () -> ManifestComponentHelper.VersionOptionList,
     val applyScreenSizeToConfig: () -> Unit,

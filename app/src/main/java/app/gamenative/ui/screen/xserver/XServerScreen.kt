@@ -266,8 +266,8 @@ private suspend fun resolveBackdropImageModels(
 
     when (gameSource) {
         GameSource.STEAM -> {
-            steamAppInfo?.headerUrl?.takeIf { it.isNotEmpty() }?.let(models::add)
             steamAppInfo?.getHeroUrl()?.takeIf { it.isNotEmpty() }?.let(models::add)
+            steamAppInfo?.headerUrl?.takeIf { it.isNotEmpty() }?.let(models::add)
         }
 
         GameSource.CUSTOM_GAME -> {
@@ -309,11 +309,17 @@ private suspend fun resolveBackdropImageModels(
     models.toList()
 }
 
-private suspend fun loadBackdropBitmap(context: Context, imageModel: String): Bitmap? = withContext(Dispatchers.IO) {
+private suspend fun loadBackdropBitmap(
+    context: Context,
+    imageModel: String,
+    targetWidth: Int,
+    targetHeight: Int,
+): Bitmap? = withContext(Dispatchers.IO) {
     try {
         val loader = ImageLoader(context)
         val request = ImageRequest.Builder(context)
             .data(imageModel)
+            .size(targetWidth.coerceAtLeast(1), targetHeight.coerceAtLeast(1))
             .allowHardware(false)
             .build()
         val drawable = (loader.execute(request) as? SuccessResult)?.drawable ?: return@withContext null
@@ -329,7 +335,8 @@ private suspend fun loadBackdropBitmap(context: Context, imageModel: String): Bi
                 }
             }
         }
-    } catch (e: Throwable) {
+    } catch (e: Exception) {
+        if (e is java.util.concurrent.CancellationException || e is kotlinx.coroutines.CancellationException) throw e
         Timber.d(e, "Failed loading backdrop image model: $imageModel")
         null
     }
@@ -440,11 +447,14 @@ fun XServerScreen(
     }
 
     LaunchedEffect(xServerView, appId) {
-        val renderer = xServerView?.renderer ?: return@LaunchedEffect
+        val currentXServerView = xServerView ?: return@LaunchedEffect
+        val renderer = currentXServerView.renderer
+        val targetWidth = renderer.surfaceWidth.takeIf { it > 0 } ?: currentXServerView.width.takeIf { it > 0 } ?: context.resources.displayMetrics.widthPixels
+        val targetHeight = renderer.surfaceHeight.takeIf { it > 0 } ?: currentXServerView.height.takeIf { it > 0 } ?: context.resources.displayMetrics.heightPixels
         val imageModels = resolveBackdropImageModels(context, appId, container, currentAppInfo)
         var backdropBitmap: Bitmap? = null
         for (imageModel in imageModels) {
-            backdropBitmap = loadBackdropBitmap(context, imageModel)
+            backdropBitmap = loadBackdropBitmap(context, imageModel, targetWidth, targetHeight)
             if (backdropBitmap != null) break
         }
         if (backdropBitmap != null) {

@@ -325,11 +325,11 @@ fun GeneralTabContent(
                 action = if (config.backdropImageUri.isNotEmpty()) {
                     {
                         IconButton(
-                            onClick = { state.config.value = config.copy(backdropImageUri = "") },
+                            onClick = { state.clearBackdropImage() },
                             content = {
                                 Icon(
                                     imageVector = Icons.Filled.Delete,
-                                    contentDescription = null,
+                                    contentDescription = stringResource(R.string.clear_backdrop_image),
                                 )
                             },
                         )

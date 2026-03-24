@@ -408,22 +408,26 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
     }
 
     public void setBackdropBitmap(Bitmap bitmap) {
-        if (backdropBitmap != null && backdropBitmap != bitmap && !backdropBitmap.isRecycled()) {
-            backdropBitmap.recycle();
-        }
-        backdropBitmap = bitmap;
-        deleteBackdropTexture();
-        backdropTextureDirty = bitmap != null;
+        xServerView.queueEvent(() -> {
+            if (backdropBitmap != null && backdropBitmap != bitmap && !backdropBitmap.isRecycled()) {
+                backdropBitmap.recycle();
+            }
+            backdropBitmap = bitmap;
+            deleteBackdropTexture();
+            backdropTextureDirty = bitmap != null;
+        });
         xServerView.requestRender();
     }
 
     public void clearBackdrop() {
-        if (backdropBitmap != null && !backdropBitmap.isRecycled()) {
-            backdropBitmap.recycle();
-        }
-        backdropBitmap = null;
-        deleteBackdropTexture();
-        backdropTextureDirty = false;
+        xServerView.queueEvent(() -> {
+            if (backdropBitmap != null && !backdropBitmap.isRecycled()) {
+                backdropBitmap.recycle();
+            }
+            backdropBitmap = null;
+            deleteBackdropTexture();
+            backdropTextureDirty = false;
+        });
         xServerView.requestRender();
     }
 
