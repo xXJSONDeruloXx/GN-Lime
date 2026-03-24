@@ -14,6 +14,7 @@ import com.winlator.math.Mathf;
 import com.winlator.math.XForm;
 import com.winlator.renderer.material.CursorMaterial;
 import com.winlator.renderer.material.ShaderMaterial;
+import com.winlator.renderer.material.ShadowMaterial;
 import com.winlator.renderer.material.WindowMaterial;
 import com.winlator.widget.XServerView;
 import com.winlator.xserver.Bitmask;
@@ -39,6 +40,7 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
     private final float[] tmpXForm2 = XForm.getInstance();
     private final CursorMaterial cursorMaterial = new CursorMaterial();
     private final WindowMaterial windowMaterial = new WindowMaterial();
+    private final ShadowMaterial shadowMaterial = new ShadowMaterial();
     public final ViewTransformation viewTransformation = new ViewTransformation();
     private final Drawable rootCursorDrawable;
     private final ArrayList<RenderableWindow> renderableWindows = new ArrayList<>();
@@ -150,6 +152,7 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
 
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
         renderBackdrop();
+        renderViewportShadow();
         if (magnifierEnabled) applyCurrentViewport();
 
         if (magnifierEnabled) {
@@ -330,6 +333,42 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         GLES20.glUniform1fv(windowMaterial.getUniformLocation("xform"), tmpXForm1.length, tmpXForm1, 0);
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, quadVertices.count());
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
+
+        quadVertices.disable();
+    }
+
+    private void renderShadowQuad(float x, float y, float width, float height, float leftWeight, float rightWeight, float topWeight, float bottomWeight, float alpha) {
+        if (width <= 0.0f || height <= 0.0f || alpha <= 0.0f) return;
+
+        XForm.set(tmpXForm1, x, y, width, height);
+        shadowMaterial.setUniformVec4("edgeWeights", leftWeight, rightWeight, topWeight, bottomWeight);
+        shadowMaterial.setUniformFloat("shadowAlpha", alpha);
+        GLES20.glUniform1fv(shadowMaterial.getUniformLocation("xform"), tmpXForm1.length, tmpXForm1, 0);
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, quadVertices.count());
+    }
+
+    private void renderViewportShadow() {
+        if (fullscreen || surfaceWidth <= 0 || surfaceHeight <= 0) return;
+        if (viewTransformation.viewWidth >= surfaceWidth && viewTransformation.viewHeight >= surfaceHeight) return;
+
+        float sideShadowSize = Math.max(22.0f, 34.0f * viewTransformation.aspect);
+        float verticalShadowSize = Math.max(26.0f, 42.0f * viewTransformation.aspect);
+        float sideShadowAlpha = 0.50f;
+        float verticalShadowAlpha = 0.58f;
+        float left = viewTransformation.viewOffsetX;
+        float top = viewTransformation.viewOffsetY;
+        float right = left + viewTransformation.viewWidth;
+        float bottom = top + viewTransformation.viewHeight;
+
+        GLES20.glViewport(0, 0, surfaceWidth, surfaceHeight);
+        shadowMaterial.use();
+        shadowMaterial.setUniformVec2("viewSize", surfaceWidth, surfaceHeight);
+        quadVertices.bind(shadowMaterial.programId);
+
+        renderShadowQuad(left - sideShadowSize, top, sideShadowSize, viewTransformation.viewHeight, 1.0f, 0.0f, 0.0f, 0.0f, sideShadowAlpha);
+        renderShadowQuad(right, top, sideShadowSize, viewTransformation.viewHeight, 0.0f, 1.0f, 0.0f, 0.0f, sideShadowAlpha);
+        renderShadowQuad(left, top - verticalShadowSize, viewTransformation.viewWidth, verticalShadowSize, 0.0f, 0.0f, 1.0f, 0.0f, verticalShadowAlpha);
+        renderShadowQuad(left, bottom, viewTransformation.viewWidth, verticalShadowSize, 0.0f, 0.0f, 0.0f, 1.0f, verticalShadowAlpha);
 
         quadVertices.disable();
     }
