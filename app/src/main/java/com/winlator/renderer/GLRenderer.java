@@ -5,6 +5,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
+import android.opengl.GLUtils;
 
 // import com.winlator.R;
 // import com.winlator.XrActivity;
@@ -54,6 +55,9 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
     private int surfaceHeight;
     private boolean sceneInitialized = false;
     private final EffectComposer effectComposer;
+    private Bitmap backdropBitmap;
+    private int backdropTextureId = 0;
+    private boolean backdropTextureDirty = false;
 
     public GLRenderer(XServerView xServerView, XServer xServer) {
         this.xServerView = xServerView;
@@ -95,6 +99,8 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
                 if (d != null) d.getTexture().invalidate(); // sets textureId=0 so next draw re-creates
             }
             rootCursorDrawable.getTexture().invalidate();
+            backdropTextureId = 0;
+            backdropTextureDirty = backdropBitmap != null;
         }
         updateScene();
         xServerView.requestRender();
@@ -138,14 +144,13 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         // if (XrActivity.isSupported()) xrFrame = XrActivity.getInstance().beginFrame(XrActivity.getImmersive(), XrActivity.getSBS());
 
         if (viewportNeedsUpdate && magnifierEnabled) {
-            if (fullscreen) {
-                GLES20.glViewport(0, 0, surfaceWidth, surfaceHeight);
-            }
-            else GLES20.glViewport(viewTransformation.viewOffsetX, viewTransformation.viewOffsetY, viewTransformation.viewWidth, viewTransformation.viewHeight);
+            applyCurrentViewport();
             viewportNeedsUpdate = false;
         }
 
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+        renderBackdrop();
+        if (magnifierEnabled) applyCurrentViewport();
 
         if (magnifierEnabled) {
             float pointerX = 0;
@@ -262,6 +267,73 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         }
     }
 
+    private void applyCurrentViewport() {
+        if (fullscreen) {
+            GLES20.glViewport(0, 0, surfaceWidth, surfaceHeight);
+        }
+        else {
+            GLES20.glViewport(viewTransformation.viewOffsetX, viewTransformation.viewOffsetY, viewTransformation.viewWidth, viewTransformation.viewHeight);
+        }
+    }
+
+    private void ensureBackdropTexture() {
+        if (backdropBitmap == null) return;
+
+        if (backdropTextureId == 0) {
+            int[] textureIds = new int[1];
+            GLES20.glGenTextures(1, textureIds, 0);
+            backdropTextureId = textureIds[0];
+            backdropTextureDirty = true;
+        }
+
+        if (!backdropTextureDirty) return;
+
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, backdropTextureId);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, backdropBitmap, 0);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
+        backdropTextureDirty = false;
+    }
+
+    private void deleteBackdropTexture() {
+        if (backdropTextureId == 0) return;
+        int[] textureIds = new int[]{backdropTextureId};
+        GLES20.glDeleteTextures(1, textureIds, 0);
+        backdropTextureId = 0;
+    }
+
+    private void renderBackdrop() {
+        if (backdropBitmap == null || surfaceWidth <= 0 || surfaceHeight <= 0) return;
+
+        ensureBackdropTexture();
+        if (backdropTextureId == 0) return;
+
+        GLES20.glViewport(0, 0, surfaceWidth, surfaceHeight);
+        windowMaterial.use();
+        GLES20.glUniform2f(windowMaterial.getUniformLocation("viewSize"), surfaceWidth, surfaceHeight);
+        quadVertices.bind(windowMaterial.programId);
+
+        float scale = Math.max((float) surfaceWidth / backdropBitmap.getWidth(), (float) surfaceHeight / backdropBitmap.getHeight());
+        float drawWidth = backdropBitmap.getWidth() * scale;
+        float drawHeight = backdropBitmap.getHeight() * scale;
+        float drawX = (surfaceWidth - drawWidth) * 0.5f;
+        float drawY = (surfaceHeight - drawHeight) * 0.5f;
+
+        XForm.set(tmpXForm1, drawX, drawY, drawWidth, drawHeight);
+
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, backdropTextureId);
+        GLES20.glUniform1i(windowMaterial.getUniformLocation("texture"), 0);
+        GLES20.glUniform1fv(windowMaterial.getUniformLocation("xform"), tmpXForm1.length, tmpXForm1, 0);
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, quadVertices.count());
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
+
+        quadVertices.disable();
+    }
+
     private void renderWindows() {
         windowMaterial.use();
         GLES20.glUniform2f(windowMaterial.getUniformLocation("viewSize"), xServer.screenInfo.width, xServer.screenInfo.height);
@@ -294,6 +366,26 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         }
 
         quadVertices.disable();
+    }
+
+    public void setBackdropBitmap(Bitmap bitmap) {
+        if (backdropBitmap != null && backdropBitmap != bitmap && !backdropBitmap.isRecycled()) {
+            backdropBitmap.recycle();
+        }
+        backdropBitmap = bitmap;
+        deleteBackdropTexture();
+        backdropTextureDirty = bitmap != null;
+        xServerView.requestRender();
+    }
+
+    public void clearBackdrop() {
+        if (backdropBitmap != null && !backdropBitmap.isRecycled()) {
+            backdropBitmap.recycle();
+        }
+        backdropBitmap = null;
+        deleteBackdropTexture();
+        backdropTextureDirty = false;
+        xServerView.requestRender();
     }
 
     public void toggleFullscreen() {
