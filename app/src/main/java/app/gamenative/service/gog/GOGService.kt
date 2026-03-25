@@ -197,11 +197,25 @@ class GOGService : Service() {
         fun getActiveDownloads(): Map<String, DownloadInfo> =
             getInstance()?.activeDownloads?.let { HashMap(it) } ?: emptyMap()
 
+        private fun hasPartialDownload(game: GOGGame): Boolean {
+            if (game.isInstalled) return false
+            val title = game.title.ifBlank { return false }
+            val installPath = GOGConstants.getGameInstallPath(title)
+            return app.gamenative.utils.MarkerUtils.hasPartialInstall(installPath)
+        }
+
+        fun hasPartialDownload(gameId: String, fallbackTitle: String? = null): Boolean {
+            getGOGGameOf(gameId)?.let { return hasPartialDownload(it) }
+            val title = fallbackTitle?.ifBlank { null } ?: return false
+            val installPath = GOGConstants.getGameInstallPath(title)
+            return app.gamenative.utils.MarkerUtils.hasPartialInstall(installPath)
+        }
+
         suspend fun getPartialDownloads(): List<String> {
             val instance = getInstance() ?: return emptyList()
-            return instance.gogManager.getPartialDownloads()
+            return instance.gogManager.getNonInstalledGames()
+                .filter { game -> !instance.activeDownloads.containsKey(game.id) && hasPartialDownload(game) }
                 .map { it.id }
-                .filter { gameId -> !instance.activeDownloads.containsKey(gameId) }
         }
 
         fun cleanupDownload(gameId: String) {

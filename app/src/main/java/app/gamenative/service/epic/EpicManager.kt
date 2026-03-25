@@ -718,9 +718,9 @@ class EpicManager @Inject constructor(
         }
     }
 
-    suspend fun getPartialDownloads(): List<EpicGame> {
+    suspend fun getNonInstalledGames(): List<EpicGame> {
         return withContext(Dispatchers.IO) {
-            epicGameDao.getPartialDownloads()
+            epicGameDao.getNonInstalledGames()
         }
     }
 

@@ -353,7 +353,7 @@ class SteamService : Service(), IChallengeUrlChanged {
             }
 
             val dirPath = getAppDirPath(appId)
-            return File(dirPath).exists() && !MarkerUtils.hasMarker(dirPath, Marker.DOWNLOAD_COMPLETE_MARKER)
+            return MarkerUtils.hasPartialInstall(dirPath)
         }
 
         private val syncInProgressApps = ConcurrentHashMap<Int, AtomicBoolean>()

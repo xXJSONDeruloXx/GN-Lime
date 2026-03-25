@@ -62,16 +62,6 @@ class AmazonManager @Inject constructor(
         amazonGameDao.getNonInstalledGames()
     }
 
-    /** Return games with partial_install = true from DB. */
-    suspend fun getPartialDownloads(): List<AmazonGame> = withContext(Dispatchers.IO) {
-        amazonGameDao.getPartialDownloads()
-    }
-
-    /** Mark a game as partially installed (download started but not complete). */
-    suspend fun markAsPartialInstall(productId: String, installPath: String) = withContext(Dispatchers.IO) {
-        amazonGameDao.markAsPartialInstall(productId, installPath)
-    }
-
     /** Mark a game as installed and persist install metadata. */
     suspend fun markInstalled(productId: String, installPath: String, installSize: Long, versionId: String = "") =
         withContext(Dispatchers.IO) {

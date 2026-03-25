@@ -182,11 +182,20 @@ class EpicService : Service() {
         fun getActiveDownloads(): Map<Int, DownloadInfo> =
             getInstance()?.activeDownloads?.let { HashMap(it) } ?: emptyMap()
 
+        fun hasPartialDownload(context: Context, appId: Int): Boolean {
+            val game = getEpicGameOf(appId) ?: return false
+            if (game.isInstalled) return false
+            val appName = game.appName.ifBlank { return false }
+            val installPath = EpicConstants.getGameInstallPath(context, appName)
+            return MarkerUtils.hasPartialInstall(installPath)
+        }
+
         suspend fun getPartialDownloads(): List<Int> {
             val instance = getInstance() ?: return emptyList()
-            return instance.epicManager.getPartialDownloads()
+            val context = instance.applicationContext
+            return instance.epicManager.getNonInstalledGames()
+                .filter { game -> !instance.activeDownloads.containsKey(game.id) && hasPartialDownload(context, game.id) }
                 .map { it.id }
-                .filter { appId -> !instance.activeDownloads.containsKey(appId) }
         }
 
         suspend fun deleteGame(context: Context, appId: Int): Result<Unit> {

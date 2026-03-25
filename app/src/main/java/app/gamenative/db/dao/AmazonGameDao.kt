@@ -32,18 +32,12 @@ interface AmazonGameDao {
     @Query("SELECT * FROM amazon_games WHERE is_installed = 0")
     suspend fun getNonInstalledGames(): List<AmazonGame>
 
-    @Query("SELECT * FROM amazon_games WHERE partial_install = 1")
-    suspend fun getPartialDownloads(): List<AmazonGame>
-
-    @Query("UPDATE amazon_games SET partial_install = 1, install_path = :installPath WHERE product_id = :productId")
-    suspend fun markAsPartialInstall(productId: String, installPath: String)
-
     @Query(
-        "UPDATE amazon_games SET is_installed = 1, partial_install = 0, install_path = :path, install_size = :size, version_id = :versionId WHERE product_id = :productId",
+        "UPDATE amazon_games SET is_installed = 1, install_path = :path, install_size = :size, version_id = :versionId WHERE product_id = :productId",
     )
     suspend fun markAsInstalled(productId: String, path: String, size: Long, versionId: String)
 
-    @Query("UPDATE amazon_games SET is_installed = 0, partial_install = 0, install_path = '', install_size = 0, version_id = '' WHERE product_id = :productId")
+    @Query("UPDATE amazon_games SET is_installed = 0, install_path = '', install_size = 0, version_id = '' WHERE product_id = :productId")
     suspend fun markAsUninstalled(productId: String)
 
     @Query("UPDATE amazon_games SET download_size = :size WHERE product_id = :productId")
@@ -80,7 +74,6 @@ interface AmazonGameDao {
                 newGame.copy(
                     appId = existing.appId,  // Keep the existing appId
                     isInstalled = existing.isInstalled,
-                    partialInstall = existing.partialInstall,
                     installPath = existing.installPath,
                     installSize = existing.installSize,
                     versionId = existing.versionId,

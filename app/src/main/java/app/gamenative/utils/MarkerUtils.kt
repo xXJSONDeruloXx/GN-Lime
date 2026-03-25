@@ -9,6 +9,12 @@ object MarkerUtils {
         return File(dirPath, type.fileName).exists()
     }
 
+    fun hasPartialInstall(dirPath: String): Boolean {
+        if (dirPath.isBlank()) return false
+        val dir = File(dirPath)
+        return dir.exists() && !hasMarker(dirPath, Marker.DOWNLOAD_COMPLETE_MARKER)
+    }
+
     fun addMarker(dirPath: String, type: Marker): Boolean {
         val dir = File(dirPath)
         if (File(dir, type.fileName).exists()) {

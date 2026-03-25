@@ -362,9 +362,9 @@ class AmazonService : Service() {
 
         suspend fun getPartialDownloads(context: Context): List<String> {
             val instance = getInstance() ?: return emptyList()
-            return instance.amazonManager.getPartialDownloads()
+            return instance.amazonManager.getNonInstalledGames()
+                .filter { game -> !instance.activeDownloads.containsKey(game.productId) && hasPartialDownloadByAppId(context, game.appId) }
                 .map { it.productId }
-                .filter { !instance.activeDownloads.containsKey(it) }
         }
 
         /** Returns the active [DownloadInfo] for [appId], or null if not downloading. */

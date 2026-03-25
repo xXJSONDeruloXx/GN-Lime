@@ -112,8 +112,8 @@ class GOGManager @Inject constructor(
         }
     }
 
-    suspend fun getPartialDownloads(): List<GOGGame> {
-        return withContext(Dispatchers.IO) { gogGameDao.getPartialDownloads() }
+    suspend fun getNonInstalledGames(): List<GOGGame> {
+        return withContext(Dispatchers.IO) { gogGameDao.getNonInstalledGames() }
     }
 
     suspend fun insertGame(game: GOGGame) {
@@ -472,6 +472,7 @@ class GOGManager @Inject constructor(
                 val gameId = libraryItem.gameId.toString()
                 val installPath = getGameInstallPath(gameId, libraryItem.name)
                 val installDir = File(installPath)
+                val hadInstallArtifacts = installDir.exists() || MarkerUtils.hasPartialInstall(installPath)
                 val wasInstalled = MarkerUtils.hasMarker(installPath, Marker.DOWNLOAD_COMPLETE_MARKER)
 
                 // Delete the manifest file
@@ -498,8 +499,8 @@ class GOGManager @Inject constructor(
                 MarkerUtils.removeMarker(installPath, Marker.DOWNLOAD_IN_PROGRESS_MARKER)
 
                 val game = getGameFromDbById(gameId)
-                if (game != null && (wasInstalled || game.partialInstall)) {
-                    val updatedGame = game.copy(isInstalled = false, partialInstall = false, installPath = "")
+                if (game != null && (wasInstalled || hadInstallArtifacts)) {
+                    val updatedGame = game.copy(isInstalled = false, installPath = "")
                     gogGameDao.update(updatedGame)
                     Timber.d("Updated database: game marked as not installed")
                 }
