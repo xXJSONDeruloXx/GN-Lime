@@ -1287,4 +1287,6 @@
     <string name="download_failed_message">Un fichier requis n\'a pas pu être téléchargé. Veuillez vérifier votre connexion réseau et réessayer.</string>
     <string name="install_failed_title">Échec de l\'installation</string>
     <string name="install_failed_message">Les fichiers système n\'ont pas pu être installés. Veuillez réessayer. Si le problème persiste, essayez un autre réseau ou utilisez un VPN.</string>
+    <string name="settings_interface_swap_face_buttons_title">Inverser les boutons d\'action</string>
+    <string name="settings_interface_swap_face_buttons_subtitle">Inverse les icônes des boutons A↔B et X↔Y</string>
 </resources>

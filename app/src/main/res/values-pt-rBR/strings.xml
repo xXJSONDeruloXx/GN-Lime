@@ -1157,4 +1157,6 @@
     <string name="download_failed_message">Um arquivo necessário não pôde ser baixado. Verifique sua conexão de rede e tente novamente.</string>
     <string name="install_failed_title">Falha na Instalação</string>
     <string name="install_failed_message">Os arquivos do sistema não puderam ser instalados. Tente novamente. Se o problema persistir, tente uma rede diferente ou use uma VPN.</string>
+    <string name="settings_interface_swap_face_buttons_title">Trocar botões de ação</string>
+    <string name="settings_interface_swap_face_buttons_subtitle">Troca os ícones dos botões A↔B e X↔Y</string>
 </resources>

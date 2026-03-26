@@ -1283,4 +1283,6 @@
     <string name="download_failed_message">Non è stato possibile scaricare un file necessario. Controlla la connessione di rete e riprova.</string>
     <string name="install_failed_title">Installazione non riuscita</string>
     <string name="install_failed_message">Non è stato possibile installare i file di sistema. Riprova. Se il problema persiste, prova una rete diversa o usa una VPN.</string>
+    <string name="settings_interface_swap_face_buttons_title">Scambia i pulsanti frontali</string>
+    <string name="settings_interface_swap_face_buttons_subtitle">Scambia le icone dei pulsanti A↔B e X↔Y</string>
 </resources>
