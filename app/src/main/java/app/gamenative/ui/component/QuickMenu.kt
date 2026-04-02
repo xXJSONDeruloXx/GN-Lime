@@ -6,8 +6,10 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.BorderStroke
@@ -211,15 +213,16 @@ private fun matchesPerformanceHudPreset(
 }
 
 private fun fpsLimiterSteps(maxFps: Int): List<Int> {
-    val sanitizedMax = maxFps.coerceAtLeast(30)
+    val sanitizedMax = maxFps.coerceAtLeast(5)
     return buildList {
-        for (value in 15..sanitizedMax step 5) {
+        var value = 5
+        while (value <= sanitizedMax) {
             add(value)
+            value += 5
         }
-        if (isEmpty() || last() != sanitizedMax) {
+        if (last() != sanitizedMax) {
             add(sanitizedMax)
         }
-        add(0)
     }.distinct()
 }
 
@@ -249,9 +252,11 @@ fun QuickMenu(
     renderer: GLRenderer? = null,
     isPerformanceHudEnabled: Boolean = false,
     performanceHudConfig: PerformanceHudConfig = PerformanceHudConfig(),
-    fpsLimiterValue: Int = 0,
+    fpsLimiterEnabled: Boolean = false,
+    fpsLimiterTarget: Int = 30,
     fpsLimiterMax: Int = 60,
     onPerformanceHudConfigChanged: (PerformanceHudConfig) -> Unit = {},
+    onFpsLimiterEnabledChanged: (Boolean) -> Unit = {},
     onFpsLimiterChanged: (Int) -> Unit = {},
     hasPhysicalController: Boolean = false,
     activeToggleIds: Set<Int> = emptySet(),
@@ -492,12 +497,14 @@ fun QuickMenu(
                                         PerformanceHudQuickMenuTab(
                                             isPerformanceHudEnabled = isPerformanceHudEnabled,
                                             performanceHudConfig = performanceHudConfig,
-                                            fpsLimiterValue = fpsLimiterValue,
+                                            fpsLimiterEnabled = fpsLimiterEnabled,
+                                            fpsLimiterTarget = fpsLimiterTarget,
                                             fpsLimiterMax = fpsLimiterMax,
                                             onTogglePerformanceHud = {
                                                 onItemSelected(QuickMenuAction.PERFORMANCE_HUD)
                                             },
                                             onPerformanceHudConfigChanged = onPerformanceHudConfigChanged,
+                                            onFpsLimiterEnabledChanged = onFpsLimiterEnabledChanged,
                                             onFpsLimiterChanged = onFpsLimiterChanged,
                                             scrollState = hudScrollState,
                                             focusRequester = hudItemFocusRequester,
@@ -578,10 +585,12 @@ fun QuickMenu(
 private fun PerformanceHudQuickMenuTab(
     isPerformanceHudEnabled: Boolean,
     performanceHudConfig: PerformanceHudConfig,
-    fpsLimiterValue: Int,
+    fpsLimiterEnabled: Boolean,
+    fpsLimiterTarget: Int,
     fpsLimiterMax: Int,
     onTogglePerformanceHud: () -> Unit,
     onPerformanceHudConfigChanged: (PerformanceHudConfig) -> Unit,
+    onFpsLimiterEnabledChanged: (Boolean) -> Unit,
     onFpsLimiterChanged: (Int) -> Unit,
     scrollState: ScrollState,
     focusRequester: FocusRequester? = null,
@@ -595,39 +604,52 @@ private fun PerformanceHudQuickMenuTab(
             .focusGroup(),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        // ── FPS Limiter (topmost) ────────────────────────────────────────
         QuickMenuToggleRow(
-            title = stringResource(R.string.performance_hud),
-            subtitle = stringResource(R.string.performance_hud_description),
-            enabled = isPerformanceHudEnabled,
-            onToggle = onTogglePerformanceHud,
-            accentColor = accentColor,
-            focusRequester = focusRequester,
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        QuickMenuSectionHeader(
             title = stringResource(R.string.performance_hud_fps_limiter),
             subtitle = stringResource(
                 R.string.performance_hud_fps_limiter_description,
                 fpsLimiterMax,
             ),
+            enabled = fpsLimiterEnabled,
+            onToggle = { onFpsLimiterEnabledChanged(!fpsLimiterEnabled) },
+            accentColor = accentColor,
+            focusRequester = focusRequester,
         )
 
-        QuickMenuAdjustmentRow(
-            title = stringResource(R.string.performance_hud_fps_limiter_target),
-            valueText = if (fpsLimiterValue <= 0) {
-                stringResource(R.string.performance_hud_fps_limiter_off)
-            } else {
-                stringResource(R.string.performance_hud_fps_limiter_value, fpsLimiterValue)
-            },
-            progress = fpsLimiterProgress(fpsLimiterValue, fpsLimiterMax),
-            onDecrease = {
-                onFpsLimiterChanged(previousFpsLimiterValue(fpsLimiterValue, fpsLimiterMax))
-            },
-            onIncrease = {
-                onFpsLimiterChanged(nextFpsLimiterValue(fpsLimiterValue, fpsLimiterMax))
-            },
+        AnimatedVisibility(
+            visible = fpsLimiterEnabled,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+        ) {
+            Column {
+                Spacer(modifier = Modifier.height(4.dp))
+                QuickMenuAdjustmentRow(
+                    title = stringResource(R.string.performance_hud_fps_limiter_target),
+                    valueText = stringResource(
+                        R.string.performance_hud_fps_limiter_value,
+                        fpsLimiterTarget,
+                    ),
+                    progress = fpsLimiterProgress(fpsLimiterTarget, fpsLimiterMax),
+                    onDecrease = {
+                        onFpsLimiterChanged(previousFpsLimiterValue(fpsLimiterTarget, fpsLimiterMax))
+                    },
+                    onIncrease = {
+                        onFpsLimiterChanged(nextFpsLimiterValue(fpsLimiterTarget, fpsLimiterMax))
+                    },
+                    accentColor = accentColor,
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // ── Performance HUD ──────────────────────────────────────────────
+        QuickMenuToggleRow(
+            title = stringResource(R.string.performance_hud),
+            subtitle = stringResource(R.string.performance_hud_description),
+            enabled = isPerformanceHudEnabled,
+            onToggle = onTogglePerformanceHud,
             accentColor = accentColor,
         )
 
