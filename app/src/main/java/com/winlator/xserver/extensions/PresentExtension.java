@@ -28,14 +28,53 @@ import com.winlator.xserver.events.PresentIdleNotify;
 
 import java.io.IOException;
 import java.util.Objects;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class PresentExtension implements Extension {
     public static final byte MAJOR_OPCODE = -103;
-    private static final int FAKE_INTERVAL = 1000000 / 60;
+    private static final int FAKE_INTERVAL_DEFAULT_US = 1_000_000 / 60;
     public enum Kind {PIXMAP, MSC_NOTIFY}
     public enum Mode {COPY, FLIP, SKIP}
     private final SparseArray<Event> events = new SparseArray<>();
     private SyncExtension syncExtension;
+
+    // FPS limiter: delays PresentIdleNotify/PresentCompleteNotify to create
+    // back-pressure on the game's render loop. Without this the game ignores the
+    // Android-side display throttle and renders at full speed regardless.
+    private volatile int frameRateLimit = 0;
+    private volatile long targetIntervalUs = 0L;
+    private long lastScheduledUst = 0L; // guarded by scheduleLock
+    private final Object scheduleLock = new Object();
+    private final ScheduledExecutorService presentScheduler =
+        Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "PresentExt-FpsLimiter");
+            t.setDaemon(true);
+            return t;
+        });
+
+    public void setFrameRateLimit(int limit) {
+        frameRateLimit = Math.max(0, limit);
+        if (frameRateLimit > 0) {
+            targetIntervalUs = 1_000_000L / frameRateLimit;
+        } else {
+            targetIntervalUs = 0L;
+            synchronized (scheduleLock) {
+                lastScheduledUst = 0L;
+            }
+        }
+    }
+
+    /** Returns the UST (microseconds) at which this present should be signalled,
+     *  advancing the internal watermark by targetIntervalUs each call. */
+    private long nextScheduledUst(long nowUst) {
+        synchronized (scheduleLock) {
+            long next = Math.max(nowUst, lastScheduledUst) + targetIntervalUs;
+            lastScheduledUst = next;
+            return next;
+        }
+    }
 
     private static abstract class ClientOpcodes {
         private static final byte QUERY_VERSION = 0;
@@ -128,13 +167,50 @@ public class PresentExtension implements Extension {
         Drawable content = window.getContent();
         if (content.visual.depth != pixmap.drawable.visual.depth) throw new BadMatch();
 
-        long ust = System.nanoTime() / 1000;
-        long msc = ust / FAKE_INTERVAL;
-
+        // Copy pixels immediately so the game's buffer is up-to-date on the XServer side.
         synchronized (content.renderLock) {
             content.copyArea((short)0, (short)0, xOff, yOff, pixmap.drawable.width, pixmap.drawable.height, pixmap.drawable);
+        }
+
+        // PresentIdleNotify / PresentCompleteNotify are what actually pace the game's
+        // render loop. Delaying them here creates real back-pressure: the game must wait
+        // for IdleNotify before it can reuse a pixmap buffer, so it will naturally render
+        // no faster than the configured limit regardless of how many swapchain images it has.
+        long targetInterval = this.targetIntervalUs;
+        long nowUst = System.nanoTime() / 1000;
+
+        if (targetInterval <= 0L) {
+            // No limit — fire immediately as before.
+            long msc = nowUst / FAKE_INTERVAL_DEFAULT_US;
             sendIdleNotify(window, pixmap, serial, idleFence);
-            sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
+            sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, nowUst, msc);
+        } else {
+            long scheduledUst = nextScheduledUst(nowUst);
+            long delayUs = scheduledUst - nowUst;
+
+            if (delayUs <= 1_000L) {
+                // Already within 1 ms of the target — send immediately.
+                long msc = scheduledUst / targetInterval;
+                sendIdleNotify(window, pixmap, serial, idleFence);
+                sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, scheduledUst, msc);
+            } else {
+                final Window finalWindow = window;
+                final Pixmap finalPixmap = pixmap;
+                final int finalSerial = serial;
+                final int finalIdleFence = idleFence;
+                final long finalScheduledUst = scheduledUst;
+                final long finalInterval = targetInterval;
+                presentScheduler.schedule(() -> {
+                    try {
+                        long msc = finalScheduledUst / finalInterval;
+                        sendIdleNotify(finalWindow, finalPixmap, finalSerial, finalIdleFence);
+                        sendCompleteNotify(finalWindow, finalSerial, Kind.PIXMAP, Mode.COPY,
+                                finalScheduledUst, msc);
+                    } catch (Exception ignored) {
+                        // Client may have disconnected before the scheduled notify fired.
+                    }
+                }, delayUs / 1_000L, TimeUnit.MILLISECONDS);
+            }
         }
     }
 

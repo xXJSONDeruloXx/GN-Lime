@@ -161,6 +161,7 @@ import com.winlator.xserver.ScreenInfo
 import com.winlator.xserver.Window
 import com.winlator.xserver.WindowManager
 import com.winlator.xserver.XServer
+import com.winlator.xserver.extensions.PresentExtension
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -473,6 +474,11 @@ fun XServerScreen(
         val sanitizedLimit = if (limit <= 0) 0 else limit.coerceAtMost(detectedMaxRefreshRateHz)
         fpsLimiterValue = sanitizedLimit
         xServerView?.setFrameRateLimit(sanitizedLimit)
+        // Also throttle the X Present extension so the game's own render loop
+        // receives back-pressure and actually reduces CPU/GPU usage.
+        xServerView?.getxServer()
+            ?.getExtension<PresentExtension>(PresentExtension.MAJOR_OPCODE.toInt())
+            ?.setFrameRateLimit(sanitizedLimit)
     }
 
     LaunchedEffect(xServerView) {
@@ -483,6 +489,9 @@ fun XServerScreen(
             fpsLimiterValue = clampedLimit
         }
         xServerView?.setFrameRateLimit(clampedLimit)
+        xServerView?.getxServer()
+            ?.getExtension<PresentExtension>(PresentExtension.MAJOR_OPCODE.toInt())
+            ?.setFrameRateLimit(clampedLimit)
     }
 
     fun restorePerformanceHudPosition() {
