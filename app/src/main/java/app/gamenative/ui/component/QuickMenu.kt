@@ -607,10 +607,6 @@ private fun PerformanceHudQuickMenuTab(
         // ── FPS Limiter (topmost) ────────────────────────────────────────
         QuickMenuToggleRow(
             title = stringResource(R.string.performance_hud_fps_limiter),
-            subtitle = stringResource(
-                R.string.performance_hud_fps_limiter_description,
-                fpsLimiterMax,
-            ),
             enabled = fpsLimiterEnabled,
             onToggle = { onFpsLimiterEnabledChanged(!fpsLimiterEnabled) },
             accentColor = accentColor,
