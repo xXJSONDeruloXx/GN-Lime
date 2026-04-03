@@ -214,16 +214,15 @@ private fun matchesPerformanceHudPreset(
 
 private fun fpsLimiterSteps(maxFps: Int): List<Int> {
     val sanitizedMax = maxFps.coerceAtLeast(5)
+    val flooredMax = (sanitizedMax / 5) * 5
     return buildList {
         var value = 5
-        while (value <= sanitizedMax) {
+        while (value <= flooredMax) {
             add(value)
             value += 5
         }
-        if (last() != sanitizedMax) {
-            add(sanitizedMax)
-        }
-    }.distinct()
+        if (sanitizedMax != flooredMax) add(sanitizedMax)
+    }
 }
 
 private fun fpsLimiterProgress(currentValue: Int, maxFps: Int): Float {
