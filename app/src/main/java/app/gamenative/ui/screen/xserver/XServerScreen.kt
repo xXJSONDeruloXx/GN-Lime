@@ -217,7 +217,7 @@ private fun detectMaxRefreshRateHz(context: Context, attachedView: View?): Int {
     return refreshRate
         .takeIf { it.isFinite() && it > 0f }
         ?.roundToInt()
-        ?.coerceAtLeast(30)
+        ?.coerceAtLeast(5)
         ?: DEFAULT_FPS_LIMITER_MAX_HZ
 }
 
@@ -1976,9 +1976,6 @@ fun XServerScreen(
                 // Remove the WindowManager listener associated with the released AndroidView.
                 binding.xServerView.renderer.setOnFrameRenderedListener(null)
                 binding.xServerView.getxServer().windowManager.removeOnWindowModificationListener(binding.windowModificationListener)
-                binding.xServerView.getxServer()
-                    .getExtension<PresentExtension>(PresentExtension.MAJOR_OPCODE.toInt())
-                    ?.close()
                 if (PluviaApp.xServerView === binding.xServerView) {
                     PluviaApp.xServerView = null
                 }

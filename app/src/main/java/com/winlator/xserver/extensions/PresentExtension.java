@@ -195,7 +195,7 @@ public class PresentExtension implements Extension {
 
             if (delayUs <= 1_000L) {
                 // Already within 1 ms of the target — send immediately.
-                long msc = scheduledUst / targetInterval;
+                long msc = scheduledUst / FAKE_INTERVAL_DEFAULT_US;
                 sendIdleNotify(window, pixmap, serial, idleFence);
                 sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, scheduledUst, msc);
             } else {
@@ -209,7 +209,7 @@ public class PresentExtension implements Extension {
                 presentScheduler.schedule(() -> {
                     try {
                         if (limitGeneration.get() == capturedGen) {
-                            long msc = finalScheduledUst / finalInterval;
+                            long msc = finalScheduledUst / FAKE_INTERVAL_DEFAULT_US;
                             sendIdleNotify(finalWindow, finalPixmap, finalSerial, finalIdleFence);
                             sendCompleteNotify(finalWindow, finalSerial, Kind.PIXMAP, Mode.COPY,
                                     finalScheduledUst, msc);
