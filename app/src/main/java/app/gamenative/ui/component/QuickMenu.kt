@@ -212,36 +212,8 @@ private fun matchesPerformanceHudPreset(
         currentConfig.showGpuUsageGraph == presetConfig.showGpuUsageGraph
 }
 
-private fun fpsLimiterSteps(maxFps: Int): List<Int> {
-    val sanitizedMax = maxFps.coerceAtLeast(5)
-    val flooredMax = (sanitizedMax / 5) * 5
-    return buildList {
-        var value = 5
-        while (value <= flooredMax) {
-            add(value)
-            value += 5
-        }
-        if (sanitizedMax != flooredMax) add(sanitizedMax)
-    }
-}
-
-private fun fpsLimiterProgress(currentValue: Int, maxFps: Int): Float {
-    val steps = fpsLimiterSteps(maxFps)
-    val currentIndex = steps.indexOfFirst { it == currentValue }.takeIf { it >= 0 } ?: (steps.lastIndex)
-    return if (steps.lastIndex <= 0) 1f else currentIndex.toFloat() / steps.lastIndex.toFloat()
-}
-
-private fun nextFpsLimiterValue(currentValue: Int, maxFps: Int): Int {
-    val steps = fpsLimiterSteps(maxFps)
-    val currentIndex = steps.indexOfFirst { it == currentValue }.takeIf { it >= 0 } ?: steps.lastIndex
-    return steps[(currentIndex + 1).coerceAtMost(steps.lastIndex)]
-}
-
-private fun previousFpsLimiterValue(currentValue: Int, maxFps: Int): Int {
-    val steps = fpsLimiterSteps(maxFps)
-    val currentIndex = steps.indexOfFirst { it == currentValue }.takeIf { it >= 0 } ?: steps.lastIndex
-    return steps[(currentIndex - 1).coerceAtLeast(0)]
-}
+// fpsLimiterSteps / fpsLimiterCurrentIndex / fpsLimiterProgress /
+// nextFpsLimiterValue / previousFpsLimiterValue live in FpsLimiterUtils.kt
 
 @Composable
 fun QuickMenu(

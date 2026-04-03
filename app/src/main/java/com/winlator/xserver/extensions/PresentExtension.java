@@ -31,6 +31,7 @@ import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class PresentExtension implements Extension {
     public static final byte MAJOR_OPCODE = -103;
@@ -47,6 +48,9 @@ public class PresentExtension implements Extension {
     private volatile long targetIntervalUs = 0L;
     private long lastScheduledUst = 0L; // guarded by scheduleLock
     private final Object scheduleLock = new Object();
+    // Incremented on every setFrameRateLimit call so in-flight lambdas can detect
+    // that the limit changed and fire immediately instead of stalling the game.
+    private final AtomicInteger limitGeneration = new AtomicInteger(0);
     private final ScheduledExecutorService presentScheduler =
         Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "PresentExt-FpsLimiter");
@@ -55,22 +59,23 @@ public class PresentExtension implements Extension {
         });
 
     public void setFrameRateLimit(int limit) {
-        frameRateLimit = Math.max(0, limit);
-        if (frameRateLimit > 0) {
-            targetIntervalUs = 1_000_000L / frameRateLimit;
-        } else {
-            targetIntervalUs = 0L;
-            synchronized (scheduleLock) {
-                lastScheduledUst = 0L;
-            }
+        synchronized (scheduleLock) {
+            frameRateLimit = Math.max(0, limit);
+            targetIntervalUs = frameRateLimit > 0 ? 1_000_000L / frameRateLimit : 0L;
+            lastScheduledUst = 0L; // reset pacing watermark on every change
         }
+        limitGeneration.incrementAndGet(); // invalidate any in-flight scheduled notifies
     }
 
-    /** Returns the UST (microseconds) at which this present should be signalled,
-     *  advancing the internal watermark by targetIntervalUs each call. */
+    public void close() {
+        presentScheduler.shutdownNow();
+    }
+
     private long nextScheduledUst(long nowUst) {
         synchronized (scheduleLock) {
-            long next = Math.max(nowUst, lastScheduledUst) + targetIntervalUs;
+            // Use the later of (last watermark + interval) or now so that already-late
+            // frames are not penalised by an extra full interval of delay.
+            long next = Math.max(lastScheduledUst + targetIntervalUs, nowUst);
             lastScheduledUst = next;
             return next;
         }
@@ -200,12 +205,22 @@ public class PresentExtension implements Extension {
                 final int finalIdleFence = idleFence;
                 final long finalScheduledUst = scheduledUst;
                 final long finalInterval = targetInterval;
+                final int capturedGen = limitGeneration.get();
                 presentScheduler.schedule(() -> {
                     try {
-                        long msc = finalScheduledUst / finalInterval;
-                        sendIdleNotify(finalWindow, finalPixmap, finalSerial, finalIdleFence);
-                        sendCompleteNotify(finalWindow, finalSerial, Kind.PIXMAP, Mode.COPY,
-                                finalScheduledUst, msc);
+                        if (limitGeneration.get() == capturedGen) {
+                            long msc = finalScheduledUst / finalInterval;
+                            sendIdleNotify(finalWindow, finalPixmap, finalSerial, finalIdleFence);
+                            sendCompleteNotify(finalWindow, finalSerial, Kind.PIXMAP, Mode.COPY,
+                                    finalScheduledUst, msc);
+                        } else {
+                            // Limit changed while this frame was queued — fire immediately
+                            // so the game is not stalled at the old cadence.
+                            long ustNow = System.nanoTime() / 1000;
+                            sendIdleNotify(finalWindow, finalPixmap, finalSerial, finalIdleFence);
+                            sendCompleteNotify(finalWindow, finalSerial, Kind.PIXMAP, Mode.COPY,
+                                    ustNow, ustNow / FAKE_INTERVAL_DEFAULT_US);
+                        }
                     } catch (Exception ignored) {
                         // Client may have disconnected before the scheduled notify fired.
                     }

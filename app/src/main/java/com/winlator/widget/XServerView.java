@@ -77,22 +77,23 @@ public class XServerView extends GLSurfaceView {
     }
 
     public void setFrameRateLimit(int frameRateLimit) {
-        final boolean shouldKickRender;
+        final boolean shouldRecomputeRender;
         synchronized (renderThrottleLock) {
+            boolean hadScheduledRender = renderRequestScheduled;
             this.frameRateLimit = Math.max(0, frameRateLimit);
             minRenderIntervalMs = this.frameRateLimit > 0
                 ? Math.max(1L, Math.round(1000f / (float) this.frameRateLimit))
                 : 0L;
 
-            if (this.frameRateLimit == 0 && renderRequestScheduled) {
+            if (hadScheduledRender) {
                 renderThrottleHandler.removeCallbacks(throttledRenderRunnable);
                 renderRequestScheduled = false;
             }
-            shouldKickRender = this.frameRateLimit == 0;
+            shouldRecomputeRender = this.frameRateLimit == 0 || hadScheduledRender;
         }
 
-        if (shouldKickRender) {
-            super.requestRender();
+        if (shouldRecomputeRender) {
+            requestRender();
         }
     }
 
