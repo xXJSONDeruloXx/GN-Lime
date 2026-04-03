@@ -190,11 +190,11 @@ public class PresentExtension implements Extension {
             sendIdleNotify(window, pixmap, serial, idleFence);
             sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, nowUst, msc);
         } else {
+            final int capturedGen = limitGeneration.get();
             long scheduledUst = nextScheduledUst(nowUst);
             long delayUs = scheduledUst - nowUst;
 
             if (delayUs <= 1_000L) {
-                // Already within 1 ms of the target — send immediately.
                 long msc = scheduledUst / FAKE_INTERVAL_DEFAULT_US;
                 sendIdleNotify(window, pixmap, serial, idleFence);
                 sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, scheduledUst, msc);
@@ -204,8 +204,6 @@ public class PresentExtension implements Extension {
                 final int finalSerial = serial;
                 final int finalIdleFence = idleFence;
                 final long finalScheduledUst = scheduledUst;
-                final long finalInterval = targetInterval;
-                final int capturedGen = limitGeneration.get();
                 presentScheduler.schedule(() -> {
                     try {
                         if (limitGeneration.get() == capturedGen) {
