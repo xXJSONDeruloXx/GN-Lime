@@ -40,6 +40,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Gamepad
@@ -81,6 +82,7 @@ import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.adaptivePanelWidth
 import app.gamenative.utils.MathUtils.normalizedProgress
 import com.winlator.renderer.GLRenderer
+import com.winlator.winhandler.WinHandler
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -97,6 +99,7 @@ private object QuickMenuTab {
     const val HUD = 0
     const val EFFECTS = 1
     const val CONTROLLER = 2
+    const val TOOLS = 3
 }
 
 data class QuickMenuItem(
@@ -216,6 +219,7 @@ fun QuickMenu(
     onDismiss: () -> Unit,
     onItemSelected: (Int) -> Boolean,
     renderer: GLRenderer? = null,
+    winHandler: WinHandler? = null,
     isPerformanceHudEnabled: Boolean = false,
     performanceHudConfig: PerformanceHudConfig = PerformanceHudConfig(),
     onPerformanceHudConfigChanged: (PerformanceHudConfig) -> Unit = {},
@@ -271,6 +275,7 @@ fun QuickMenu(
     val selectedTabLabelResId = when (selectedTab) {
         QuickMenuTab.HUD -> R.string.performance_hud
         QuickMenuTab.EFFECTS -> R.string.screen_effects
+        QuickMenuTab.TOOLS -> R.string.task_manager
         else -> R.string.quick_menu_tab_controller
     }
 
@@ -280,9 +285,11 @@ fun QuickMenu(
     val controllerScrollState = rememberScrollState()
     val hudTabFocusRequester = remember { FocusRequester() }
     val controllerTabFocusRequester = remember { FocusRequester() }
+    val toolsTabFocusRequester = remember { FocusRequester() }
     val hudItemFocusRequester = remember { FocusRequester() }
     val effectsItemFocusRequester = remember { FocusRequester() }
     val controllerItemFocusRequester = remember { FocusRequester() }
+    val toolsItemFocusRequester = remember { FocusRequester() }
 
     BackHandler(enabled = isVisible) {
         onDismiss()
@@ -403,6 +410,15 @@ fun QuickMenu(
                                     modifier = Modifier.width(56.dp),
                                     focusRequester = controllerTabFocusRequester,
                                 )
+                                QuickMenuTabButton(
+                                    icon = Icons.Default.BarChart,
+                                    contentDescriptionResId = R.string.task_manager,
+                                    selected = selectedTab == QuickMenuTab.TOOLS,
+                                    accentColor = PluviaTheme.colors.accentPurple,
+                                    onSelected = { selectedTab = QuickMenuTab.TOOLS },
+                                    modifier = Modifier.width(56.dp),
+                                    focusRequester = toolsTabFocusRequester,
+                                )
                             }
 
                             Spacer(modifier = Modifier.weight(1f))
@@ -492,6 +508,15 @@ fun QuickMenu(
                                         }
                                     }
 
+                                    QuickMenuTab.TOOLS -> {
+                                        ToolsQuickMenuTab(
+                                            winHandler = winHandler,
+                                            onDismiss = onDismiss,
+                                            firstItemFocusRequester = toolsItemFocusRequester,
+                                            modifier = Modifier.fillMaxSize(),
+                                        )
+                                    }
+
                                     else -> {
                                         Column(
                                             modifier = Modifier
@@ -534,6 +559,39 @@ fun QuickMenu(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ToolsQuickMenuTab(
+    winHandler: WinHandler?,
+    onDismiss: () -> Unit,
+    firstItemFocusRequester: FocusRequester? = null,
+    modifier: Modifier = Modifier,
+) {
+    val scrollState = rememberScrollState()
+    val item = QuickMenuItem(
+        id = -1,
+        icon = Icons.Default.BarChart,
+        labelResId = R.string.launch_task_manager,
+        accentColor = PluviaTheme.colors.accentWarning,
+        enabled = winHandler != null,
+    )
+
+    Column(
+        modifier = modifier
+            .verticalScroll(scrollState)
+            .focusGroup(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        QuickMenuItemRow(
+            item = item,
+            onClick = {
+                winHandler?.exec("taskmgr.exe")
+                onDismiss()
+            },
+            focusRequester = firstItemFocusRequester,
+        )
     }
 }
 
