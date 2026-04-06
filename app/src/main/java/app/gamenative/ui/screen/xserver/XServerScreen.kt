@@ -194,6 +194,7 @@ private val isExiting = AtomicBoolean(false)
 private const val EXIT_PROCESS_TIMEOUT_MS = 30_000L
 private const val EXIT_PROCESS_POLL_INTERVAL_MS = 1_000L
 private const val EXIT_PROCESS_RESPONSE_TIMEOUT_MS = 2_000L
+private const val QUICK_MENU_PROCESS_POLL_INTERVAL_MS = 2_000L
 
 private data class XServerViewReleaseBinding(
     val xServerView: XServerView,
@@ -372,6 +373,8 @@ fun XServerScreen(
     var showPhysicalControllerDialog by remember { mutableStateOf(false) }
     var keyboardRequestedFromOverlay by remember { mutableStateOf(false) }
     var showQuickMenu by remember { mutableStateOf(false) }
+    var quickMenuWineProcesses by remember { mutableStateOf<List<ProcessInfo>>(emptyList()) }
+    var quickMenuWineProcessesLoading by remember { mutableStateOf(false) }
     var hasPhysicalController by remember { mutableStateOf(false) }
     var keepPausedForEditor by remember { mutableStateOf(false) }
     var hasPhysicalKeyboard by remember { mutableStateOf(false) }
@@ -786,6 +789,37 @@ fun XServerScreen(
             }
         }
         showQuickMenu = false
+    }
+
+    LaunchedEffect(showQuickMenu) {
+        if (!showQuickMenu) {
+            quickMenuWineProcesses = emptyList()
+            quickMenuWineProcessesLoading = false
+            return@LaunchedEffect
+        }
+
+        quickMenuWineProcessesLoading = true
+        while (showQuickMenu) {
+            val snapshot = withContext(Dispatchers.IO) {
+                ProcessHelper.listSubProcesses()
+                    .asSequence()
+                    .filter { it.name.endsWith(".exe", ignoreCase = true) }
+                    .map {
+                        ProcessInfo(
+                            it.pid,
+                            it.name.substringAfterLast('\\').substringAfterLast('/'),
+                            it.rssBytes,
+                            0,
+                            false,
+                        )
+                    }
+                    .sortedByDescending { it.memoryUsage }
+                    .toList()
+            }
+            quickMenuWineProcesses = snapshot
+            quickMenuWineProcessesLoading = false
+            delay(QUICK_MENU_PROCESS_POLL_INTERVAL_MS)
+        }
     }
 
     val onQuickMenuItemSelected: (Int) -> Boolean = { itemId ->
@@ -2037,6 +2071,8 @@ fun XServerScreen(
             onItemSelected = onQuickMenuItemSelected,
             renderer = xServerView?.renderer,
             winHandler = xServerView?.getxServer()?.winHandler,
+            wineProcesses = quickMenuWineProcesses,
+            isWineProcessesLoading = quickMenuWineProcessesLoading,
             isPerformanceHudEnabled = isPerformanceHudEnabled,
             performanceHudConfig = performanceHudConfig,
             onPerformanceHudConfigChanged = ::applyPerformanceHudConfig,
