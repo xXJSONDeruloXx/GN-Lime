@@ -257,10 +257,11 @@ private suspend fun resolveBackdropImageModels(
 ): List<String> = withContext(Dispatchers.IO) {
     val models = linkedSetOf<String>()
 
-    container.getExtra("backdropImageUri", "")
-        .trim()
-        .takeIf { it.isNotEmpty() }
-        ?.let(models::add)
+    val userUri = container.getExtra("backdropImageUri", "").trim()
+    if (userUri.isNotEmpty()) {
+        models.add(userUri)
+        return@withContext models.toList()
+    }
 
     val gameSource = ContainerUtils.extractGameSourceFromContainerId(appId)
     val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
@@ -336,8 +337,9 @@ private suspend fun loadBackdropBitmap(
                 }
             }
         }
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Exception) {
-        if (e is java.util.concurrent.CancellationException || e is kotlinx.coroutines.CancellationException) throw e
         Timber.d(e, "Failed loading backdrop image model: $imageModel")
         null
     }
