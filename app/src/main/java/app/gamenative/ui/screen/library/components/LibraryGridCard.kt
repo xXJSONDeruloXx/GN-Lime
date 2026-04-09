@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -183,11 +184,23 @@ internal fun GridViewCard(
                     )
                 }
 
+                val gridHeroZoom = if (!isCapsule && appInfo.gridHeroImageScale != 1f) {
+                    Modifier.graphicsLayer {
+                        scaleX = appInfo.gridHeroImageScale
+                        scaleY = appInfo.gridHeroImageScale
+                        transformOrigin = TransformOrigin.Center
+                    }
+                } else {
+                    Modifier
+                }
+
                 ListItemImage(
                     modifier = Modifier.fillMaxSize(),
                     imageModifier = Modifier
                         .fillMaxSize()
-                        .alpha(imageAlpha),
+                        .alpha(imageAlpha)
+                        .then(gridHeroZoom),
+                    contentScale = getGridContentScale(paneType),
                     image = { currentImageUrl },
                     onFailure = {
                         if (imageUrls.fallback.isNotEmpty() && currentImageUrl == imageUrls.primary) {
@@ -372,6 +385,14 @@ private fun GridStatusIcons(appInfo: LibraryItem) {
  * Primary and optional fallback image URL for grid view (e.g. Steam header -> hero).
  */
 internal data class GridImageUrls(val primary: String, val fallback: String = "")
+
+private fun getGridContentScale(paneType: PaneType): ContentScale {
+    return if (paneType == PaneType.GRID_HERO) {
+        ContentScale.Crop
+    } else {
+        ContentScale.Fit
+    }
+}
 
 /**
  * Gets the appropriate image URL(s) for a game in grid view.
