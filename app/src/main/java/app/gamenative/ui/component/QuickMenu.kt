@@ -127,6 +127,7 @@ private fun applyPerformanceHudPreset(
             showBatteryLevel = false,
             showPowerDraw = false,
             showBatteryRuntime = false,
+            showBatteryTemperature = false,
             showClockTime = false,
             showCpuTemperature = false,
             showGpuTemperature = false,
@@ -143,6 +144,7 @@ private fun applyPerformanceHudPreset(
             showBatteryLevel = false,
             showPowerDraw = false,
             showBatteryRuntime = false,
+            showBatteryTemperature = false,
             showClockTime = false,
             showCpuTemperature = false,
             showGpuTemperature = false,
@@ -159,6 +161,7 @@ private fun applyPerformanceHudPreset(
             showBatteryLevel = true,
             showPowerDraw = false,
             showBatteryRuntime = true,
+            showBatteryTemperature = true,
             showClockTime = false,
             showCpuTemperature = false,
             showGpuTemperature = false,
@@ -175,6 +178,7 @@ private fun applyPerformanceHudPreset(
             showBatteryLevel = true,
             showPowerDraw = true,
             showBatteryRuntime = true,
+            showBatteryTemperature = true,
             showClockTime = true,
             showCpuTemperature = true,
             showGpuTemperature = true,
@@ -197,6 +201,7 @@ private fun matchesPerformanceHudPreset(
         currentConfig.showBatteryLevel == presetConfig.showBatteryLevel &&
         currentConfig.showPowerDraw == presetConfig.showPowerDraw &&
         currentConfig.showBatteryRuntime == presetConfig.showBatteryRuntime &&
+        currentConfig.showBatteryTemperature == presetConfig.showBatteryTemperature &&
         currentConfig.showClockTime == presetConfig.showClockTime &&
         currentConfig.showCpuTemperature == presetConfig.showCpuTemperature &&
         currentConfig.showGpuTemperature == presetConfig.showGpuTemperature &&
@@ -215,6 +220,7 @@ fun QuickMenu(
     performanceHudConfig: PerformanceHudConfig = PerformanceHudConfig(),
     onPerformanceHudConfigChanged: (PerformanceHudConfig) -> Unit = {},
     hasPhysicalController: Boolean = false,
+    activeToggleIds: Set<Int> = emptySet(),
     modifier: Modifier = Modifier,
 ) {
     val exitGameItem = QuickMenuItem(
@@ -261,7 +267,7 @@ fun QuickMenu(
         )
     }
 
-    var selectedTab by rememberSaveable { mutableIntStateOf(QuickMenuTab.HUD) }
+    var selectedTab by rememberSaveable(isVisible) { mutableIntStateOf(QuickMenuTab.HUD) }
     val selectedTabLabelResId = when (selectedTab) {
         QuickMenuTab.HUD -> R.string.performance_hud
         QuickMenuTab.EFFECTS -> R.string.screen_effects
@@ -269,6 +275,7 @@ fun QuickMenu(
     }
 
     val hudScrollState = rememberScrollState()
+    val effectsScrollState = rememberScrollState()
     val effectsTabFocusRequester = remember { FocusRequester() }
     val controllerScrollState = rememberScrollState()
     val hudTabFocusRequester = remember { FocusRequester() }
@@ -467,6 +474,7 @@ fun QuickMenu(
                                                 renderer = renderer,
                                                 modifier = Modifier.fillMaxSize(),
                                                 firstItemFocusRequester = effectsItemFocusRequester,
+                                                scrollState = effectsScrollState,
                                             )
                                         } else {
                                             Box(
@@ -495,6 +503,7 @@ fun QuickMenu(
                                             controllerItems.forEachIndexed { index, item ->
                                                 QuickMenuItemRow(
                                                     item = item,
+                                                    isActive = item.id in activeToggleIds,
                                                     onClick = {
                                                         if (onItemSelected(item.id)) {
                                                             onDismiss()
@@ -516,15 +525,9 @@ fun QuickMenu(
 
     LaunchedEffect(isVisible) {
         if (isVisible) {
-            selectedTab = QuickMenuTab.HUD
-        }
-    }
-
-    LaunchedEffect(isVisible, selectedTab) {
-        if (isVisible && selectedTab == QuickMenuTab.HUD) {
             repeat(3) {
                 try {
-                    hudTabFocusRequester.requestFocus()
+                    hudItemFocusRequester.requestFocus()
                     return@LaunchedEffect
                 } catch (_: Exception) {
                     delay(80)
@@ -783,6 +786,16 @@ private fun PerformanceHudQuickMenuTab(
             onToggle = {
                 onPerformanceHudConfigChanged(
                     performanceHudConfig.copy(showBatteryRuntime = !performanceHudConfig.showBatteryRuntime),
+                )
+            },
+            accentColor = accentColor,
+        )
+        QuickMenuToggleRow(
+            title = stringResource(R.string.performance_hud_battery_temperature),
+            enabled = performanceHudConfig.showBatteryTemperature,
+            onToggle = {
+                onPerformanceHudConfigChanged(
+                    performanceHudConfig.copy(showBatteryTemperature = !performanceHudConfig.showBatteryTemperature),
                 )
             },
             accentColor = accentColor,
@@ -1475,6 +1488,7 @@ private fun QuickMenuSwitch(
 @Composable
 private fun QuickMenuItemRow(
     item: QuickMenuItem,
+    isActive: Boolean = false,
     onClick: () -> Unit,
     focusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
@@ -1553,11 +1567,16 @@ private fun QuickMenuItemRow(
         Box(
             modifier = Modifier
                 .size(40.dp)
+                .then(
+                    if (isActive) {
+                        Modifier.border(BorderStroke(2.dp, accentColor), CircleShape)
+                    } else Modifier
+                )
                 .clip(CircleShape)
                 .background(
                     when {
                         !isEnabled -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                        isFocused -> accentColor.copy(alpha = 0.2f)
+                        isFocused || isActive -> accentColor.copy(alpha = 0.2f)
                         else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     },
                 ),
@@ -1568,7 +1587,7 @@ private fun QuickMenuItemRow(
                 contentDescription = null,
                 tint = when {
                     !isEnabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = disabledAlpha)
-                    isFocused -> accentColor
+                    isFocused || isActive -> accentColor
                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                 },
                 modifier = Modifier.size(22.dp),

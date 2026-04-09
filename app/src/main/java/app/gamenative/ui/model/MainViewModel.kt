@@ -500,9 +500,9 @@ class MainViewModel @Inject constructor(
                 // After app closes, check if we need to show the feedback dialog
                 // Show feedback if: first time running this game OR config was changed
                 try {
-                    // Do not show the Feedback form for non-steam games until we can support.
+                    // Show feedback for all stores except custom games.
                     val feedbackGameSource = ContainerUtils.extractGameSourceFromContainerId(appId)
-                    if (feedbackGameSource == GameSource.STEAM) {
+                    if (feedbackGameSource != GameSource.CUSTOM_GAME) {
                         val container = ContainerUtils.getContainer(context, appId)
 
                         val shown = container.getExtra("discord_support_prompt_shown", "false") == "true"
@@ -522,7 +522,7 @@ class MainViewModel @Inject constructor(
                             _uiEvent.send(MainUiEvent.ShowGameFeedbackDialog(appId))
                         }
                     } else {
-                        Timber.d("Non-Steam Game Detected, not showing feedback")
+                        Timber.d("Custom game detected, not showing feedback")
                     }
                 } catch (e: Exception) {
                     Timber.w(e, "Failed to check/update feedback dialog state for $appId")
@@ -634,7 +634,8 @@ class MainViewModel @Inject constructor(
                         processes.add(process)
                     } while (parentWindow != null)
 
-                    GameProcessInfo(appId = gameId, processes = processes).let {
+                    val installedBranch = SteamService.getInstalledApp(gameId)?.branch ?: "public"
+                    GameProcessInfo(appId = gameId, branch = installedBranch, processes = processes).let {
                         // Only notify Steam if we're not using real Steam
                         // When launchRealSteam is true, let the real Steam client handle the "game is running" notification
                         val shouldLaunchRealSteam = try {
