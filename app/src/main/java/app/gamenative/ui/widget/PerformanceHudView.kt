@@ -104,6 +104,7 @@ class PerformanceHudView(
     private val clockMetric = createMetricViews(MetricId.CLOCK, 0xFFFFCC80.toInt())
     private val cpuTempMetric = createMetricViews(MetricId.CPU_TEMP, 0xFFBDBDBD.toInt())
     private val gpuTempMetric = createMetricViews(MetricId.GPU_TEMP, 0xFFBDBDBD.toInt())
+    private val batteryTempMetric = createMetricViews(MetricId.BATTERY_TEMP, 0xFFBDBDBD.toInt())
 
     private val allMetrics = listOf(
         fpsMetric,
@@ -116,6 +117,7 @@ class PerformanceHudView(
         clockMetric,
         cpuTempMetric,
         gpuTempMetric,
+        batteryTempMetric,
     )
 
     private val allTextRows = allMetrics.flatMap { listOf(it.stackedText, it.compactText) }
@@ -231,6 +233,17 @@ class PerformanceHudView(
             textView.setTextSize(TypedValue.COMPLEX_UNIT_SP, appearance.textSizeSp)
             textView.maxLines = 1
             textView.ellipsize = TextUtils.TruncateAt.END
+            textView.setShadowLayer(
+                if (config.showTextOutline) {
+                    (textView.textSize * HUD_TEXT_SHADOW_RADIUS_RATIO)
+                        .coerceIn(MIN_HUD_TEXT_SHADOW_RADIUS_PX, MAX_HUD_TEXT_SHADOW_RADIUS_PX)
+                } else {
+                    0f
+                },
+                0f,
+                0f,
+                HUD_TEXT_SHADOW_COLOR,
+            )
         }
 
         allMetrics.forEach(::applyMetricAppearance)
@@ -241,8 +254,13 @@ class PerformanceHudView(
     }
 
     private fun applyMetricAppearance(metric: MetricViews) {
+        val textColor = blendMetricColor(metric.baseTextColor)
+        metric.stackedText.setTextColor(textColor)
+        metric.compactText.setTextColor(textColor)
         metric.stackedText.setPadding(0, appearance.rowVerticalPaddingDp.dp, 0, 0)
         metric.compactText.setPadding(0, 0, 0, 0)
+        metric.stackedGraph?.setLineColor(blendMetricColor(metric.baseGraphColor ?: metric.baseTextColor))
+        metric.compactGraph?.setLineColor(blendMetricColor(metric.baseGraphColor ?: metric.baseTextColor))
 
         (metric.stackedGraph?.layoutParams as? LinearLayout.LayoutParams)?.let { params ->
             params.width = appearance.stackedGraphWidthDp.dp
@@ -277,6 +295,7 @@ class PerformanceHudView(
                 String.format(Locale.US, "PWR %.1fW", watts)
             },
             runtime = batterySnapshot.runtimeText,
+            batteryTemp = batterySnapshot.temperatureC?.let { "BAT TEMP ${it}°C" },
             clock = readClockText(),
             cpuTemp = readCpuTempC()?.let { "CPU TEMP ${it}°C" },
             gpuTemp = readGpuTempC()?.let { "GPU TEMP ${it}°C" },
@@ -298,6 +317,10 @@ class PerformanceHudView(
         val currentMicroAmps = abs(batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW))
         val chargeCounterMicroAmpHours = batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)
         val voltageMilliVolts = statusIntent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0)
+        val temperatureC = statusIntent
+            .getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0)
+            .takeIf { it > 0 }
+            ?.let { (it / 10f).roundToInt() }
 
         val powerWatts = if (currentMicroAmps > 0L && voltageMilliVolts > 0) {
             (currentMicroAmps.toDouble() * voltageMilliVolts.toDouble()) / 1_000_000_000.0
@@ -330,6 +353,7 @@ class PerformanceHudView(
             percent = percent,
             powerWatts = powerWatts,
             runtimeText = runtimeText,
+            temperatureC = temperatureC,
         )
     }
 
@@ -361,6 +385,7 @@ class PerformanceHudView(
         updateMetricText(batteryMetric, snapshot.battery)
         updateMetricText(powerMetric, snapshot.power)
         updateMetricText(runtimeMetric, snapshot.runtime)
+        updateMetricText(batteryTempMetric, snapshot.batteryTemp)
         updateMetricText(clockMetric, snapshot.clock)
         updateMetricText(cpuTempMetric, snapshot.cpuTemp)
         updateMetricText(gpuTempMetric, snapshot.gpuTemp)
@@ -384,6 +409,7 @@ class PerformanceHudView(
             addMetricIfVisible(clockMetric, config.showClockTime)
             addMetricIfVisible(cpuTempMetric, config.showCpuTemperature)
             addMetricIfVisible(gpuTempMetric, config.showGpuTemperature)
+            addMetricIfVisible(batteryTempMetric, config.showBatteryTemperature)
         }
 
         val signatures = visibleMetrics.map {
@@ -511,6 +537,8 @@ class PerformanceHudView(
         return MetricViews(
             id = id,
             supportsGraph = stackedGraph != null && compactGraph != null,
+            baseTextColor = textColor,
+            baseGraphColor = graphColor,
             stackedText = stackedText,
             compactText = compactText,
             stackedContainer = stackedContainer,
@@ -518,6 +546,16 @@ class PerformanceHudView(
             stackedGraph = stackedGraph,
             compactGraph = compactGraph,
         )
+    }
+
+    private fun blendMetricColor(color: Int): Int {
+        val intensity = config.colorIntensity.coerceIn(0f, 1f)
+        if (intensity >= 0.999f) return color
+
+        val hsv = FloatArray(3)
+        Color.colorToHSV(color, hsv)
+        hsv[1] *= intensity
+        return Color.HSVToColor(Color.alpha(color), hsv)
     }
 
     private fun createTextView(color: Int): TextView {
@@ -711,6 +749,8 @@ class PerformanceHudView(
     private data class MetricViews(
         val id: MetricId,
         val supportsGraph: Boolean,
+        val baseTextColor: Int,
+        val baseGraphColor: Int?,
         val stackedText: TextView,
         val compactText: TextView,
         val stackedContainer: LinearLayout,
@@ -746,6 +786,12 @@ class PerformanceHudView(
             strokeJoin = Paint.Join.ROUND
         }
         private val path = Path()
+
+        fun setLineColor(color: Int) {
+            linePaint.color = color
+            glowPaint.color = Color.argb(102, Color.red(color), Color.green(color), Color.blue(color))
+            invalidate()
+        }
 
         fun applyAppearance(appearance: HudAppearance) {
             linePaint.strokeWidth = when (appearance.textSizeSp) {
@@ -922,5 +968,9 @@ class PerformanceHudView(
         const val RUNTIME_SMOOTHING_NEW_WEIGHT = 0.35
         const val GRAPH_SAMPLE_COUNT = 30
         const val GRAPH_FPS_MIN_SCALE = 60f
+        const val HUD_TEXT_SHADOW_RADIUS_RATIO = 0.18f
+        const val MIN_HUD_TEXT_SHADOW_RADIUS_PX = 1.5f
+        const val MAX_HUD_TEXT_SHADOW_RADIUS_PX = 4f
+        val HUD_TEXT_SHADOW_COLOR: Int = Color.argb(220, 0, 0, 0)
     }
 }

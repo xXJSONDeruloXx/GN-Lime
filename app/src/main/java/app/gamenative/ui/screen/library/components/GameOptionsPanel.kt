@@ -31,8 +31,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AddToHomeScreen
+import androidx.compose.material.icons.automirrored.filled.CallSplit
 import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.AltRoute
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -332,6 +334,7 @@ private fun getIconForOption(type: AppOptionMenuType): ImageVector {
         AppOptionMenuType.MoveToExternalStorage -> Icons.Default.SdStorage
         AppOptionMenuType.MoveToInternalStorage -> Icons.Default.Storage
         AppOptionMenuType.ForceCloudSync -> Icons.Default.Sync
+        AppOptionMenuType.BrowseOnlineSaves -> Icons.AutoMirrored.Filled.OpenInNew
         AppOptionMenuType.ForceDownloadRemote -> Icons.Default.CloudDownload
         AppOptionMenuType.ForceUploadLocal -> Icons.Default.CloudUpload
         AppOptionMenuType.FetchSteamGridDBImages -> Icons.Default.Image
@@ -341,6 +344,8 @@ private fun getIconForOption(type: AppOptionMenuType): ImageVector {
         AppOptionMenuType.ImportSaves -> Icons.Default.ArrowDownward
         AppOptionMenuType.ExportSaves -> Icons.Default.ArrowUpward
         AppOptionMenuType.ManageGameContent -> Icons.Default.Apps
+        AppOptionMenuType.ManageWorkshop -> Icons.Default.Build
+        AppOptionMenuType.ChangeBranch -> Icons.AutoMirrored.Filled.CallSplit
     }
 }
 
@@ -366,6 +371,7 @@ private fun groupOptions(options: List<AppMenuOption>): Map<OptionCategory, List
             AppOptionMenuType.Update,
             AppOptionMenuType.MoveToExternalStorage,
             AppOptionMenuType.MoveToInternalStorage,
+            AppOptionMenuType.ChangeBranch,
             -> gameManagement.add(option)
 
             // Container Settings
@@ -380,6 +386,7 @@ private fun groupOptions(options: List<AppMenuOption>): Map<OptionCategory, List
 
             // Cloud Saves
             AppOptionMenuType.ForceCloudSync,
+            AppOptionMenuType.BrowseOnlineSaves,
             AppOptionMenuType.ForceDownloadRemote,
             AppOptionMenuType.ForceUploadLocal,
             -> cloudSaves.add(option)
@@ -390,7 +397,8 @@ private fun groupOptions(options: List<AppMenuOption>): Map<OptionCategory, List
             AppOptionMenuType.SubmitFeedback,
             AppOptionMenuType.FetchSteamGridDBImages,
             AppOptionMenuType.TestGraphics,
-            AppOptionMenuType.ManageGameContent
+            AppOptionMenuType.ManageGameContent,
+            AppOptionMenuType.ManageWorkshop
             -> helpInfo.add(option)
         }
     }

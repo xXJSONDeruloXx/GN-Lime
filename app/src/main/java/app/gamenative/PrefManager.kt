@@ -82,6 +82,30 @@ object PrefManager {
         }
     }
 
+    /**
+     * Clears only Steam account/session state while preserving app-wide settings.
+     *
+     * This is used during Steam logout so user-configured defaults (container
+     * settings, download preferences, tips, theme, etc.) are not wiped.
+     */
+    fun clearSteamSessionPreferences() {
+        scope.launch {
+            dataStore.edit { pref ->
+                pref.remove(USER_NAME)
+                pref.remove(ACCESS_TOKEN_ENC)
+                pref.remove(REFRESH_TOKEN_ENC)
+                pref.remove(CLIENT_ID)
+                pref.remove(PERSONA_STATE)
+                pref.remove(STEAM_USER_ACCOUNT_ID)
+                pref.remove(STEAM_USER_STEAM_ID_64)
+                pref.remove(STEAM_USER_AVATAR_HASH)
+                pref.remove(STEAM_USER_NAME)
+                pref.remove(LAST_PICS_CHANGE_NUMBER)
+                pref.remove(STEAM_GAMES_COUNT)
+            }
+        }
+    }
+
     fun getBoolean(key: String, defaultValue: Boolean): Boolean =
         getPref(booleanPreferencesKey(key), defaultValue)
 
@@ -339,6 +363,13 @@ object PrefManager {
             setPref(PERFORMANCE_HUD_SHOW_BATTERY_RUNTIME, value)
         }
 
+    private val PERFORMANCE_HUD_SHOW_BATTERY_TEMPERATURE = booleanPreferencesKey("performance_hud_show_battery_temperature")
+    var performanceHudShowBatteryTemperature: Boolean
+        get() = getPref(PERFORMANCE_HUD_SHOW_BATTERY_TEMPERATURE, false)
+        set(value) {
+            setPref(PERFORMANCE_HUD_SHOW_BATTERY_TEMPERATURE, value)
+        }
+
     private val PERFORMANCE_HUD_SHOW_CLOCK_TIME = booleanPreferencesKey("performance_hud_show_clock_time")
     var performanceHudShowClockTime: Boolean
         get() = getPref(PERFORMANCE_HUD_SHOW_CLOCK_TIME, false)
@@ -388,6 +419,20 @@ object PrefManager {
             setPref(PERFORMANCE_HUD_BACKGROUND_OPACITY, value.coerceIn(0f, 1f))
         }
 
+    private val PERFORMANCE_HUD_COLOR_INTENSITY = floatPreferencesKey("performance_hud_color_intensity")
+    var performanceHudColorIntensity: Float
+        get() = getPref(PERFORMANCE_HUD_COLOR_INTENSITY, 1f)
+        set(value) {
+            setPref(PERFORMANCE_HUD_COLOR_INTENSITY, value.coerceIn(0f, 1f))
+        }
+
+    private val PERFORMANCE_HUD_SHOW_TEXT_OUTLINE = booleanPreferencesKey("performance_hud_show_text_outline")
+    var performanceHudShowTextOutline: Boolean
+        get() = getPref(PERFORMANCE_HUD_SHOW_TEXT_OUTLINE, true)
+        set(value) {
+            setPref(PERFORMANCE_HUD_SHOW_TEXT_OUTLINE, value)
+        }
+
     private val PERFORMANCE_HUD_SIZE = stringPreferencesKey("performance_hud_size")
     var performanceHudSize: String
         get() = getPref(PERFORMANCE_HUD_SIZE, "medium")
@@ -421,6 +466,13 @@ object PrefManager {
         get() = getPref(FORCE_DLC, false)
         set(value) {
             setPref(FORCE_DLC, value)
+        }
+
+    private val LOCAL_SAVES_ONLY = booleanPreferencesKey("local_saves_only")
+    var localSavesOnly: Boolean
+        get() = getPref(LOCAL_SAVES_ONLY, false)
+        set(value) {
+            setPref(LOCAL_SAVES_ONLY, value)
         }
 
     private val STEAM_OFFLINE_MODE = booleanPreferencesKey("steam_offline_mode")
@@ -883,9 +935,17 @@ object PrefManager {
     // Whether to hide the Android status bar when not in a game (in game list, settings, etc.)
     private val HIDE_STATUS_BAR_WHEN_NOT_IN_GAME = booleanPreferencesKey("hide_status_bar_when_not_in_game")
     var hideStatusBarWhenNotInGame: Boolean
-        get() = getPref(HIDE_STATUS_BAR_WHEN_NOT_IN_GAME, false)
+        get() = getPref(HIDE_STATUS_BAR_WHEN_NOT_IN_GAME, true)
         set(value) {
             setPref(HIDE_STATUS_BAR_WHEN_NOT_IN_GAME, value)
+        }
+
+    // Whether to swap A↔B and X↔Y button icons to match Xbox controller layout.
+    private val SWAP_FACE_BUTTONS = booleanPreferencesKey("swap_face_buttons")
+    var swapFaceButtons: Boolean
+        get() = getPref(SWAP_FACE_BUTTONS, false)
+        set(value) {
+            setPref(SWAP_FACE_BUTTONS, value)
         }
 
     private val ITEMS_PER_PAGE = intPreferencesKey("items_per_page")
@@ -1114,4 +1174,10 @@ object PrefManager {
     var gogAmazonPathMigrated: Boolean
         get() = getPref(GOG_AMAZON_PATH_MIGRATED, false)
         set(value) { setPref(GOG_AMAZON_PATH_MIGRATED, value) }
+
+    private val ACHIEVEMENT_NOTIFICATION_POSITION = stringPreferencesKey("achievement_notification_position")
+    var achievementNotificationPosition: String
+        get() = getPref(ACHIEVEMENT_NOTIFICATION_POSITION, "bottom_right")
+        set(value) { setPref(ACHIEVEMENT_NOTIFICATION_POSITION, value) }
+
 }

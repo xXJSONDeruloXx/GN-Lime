@@ -39,6 +39,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Gamepad
@@ -79,6 +80,7 @@ import app.gamenative.ui.data.PerformanceHudSize
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.adaptivePanelWidth
 import app.gamenative.utils.MathUtils.normalizedProgress
+import com.winlator.renderer.GLRenderer
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -93,7 +95,8 @@ object QuickMenuAction {
 
 private object QuickMenuTab {
     const val HUD = 0
-    const val CONTROLLER = 1
+    const val EFFECTS = 1
+    const val CONTROLLER = 2
 }
 
 data class QuickMenuItem(
@@ -124,6 +127,7 @@ private fun applyPerformanceHudPreset(
             showBatteryLevel = false,
             showPowerDraw = false,
             showBatteryRuntime = false,
+            showBatteryTemperature = false,
             showClockTime = false,
             showCpuTemperature = false,
             showGpuTemperature = false,
@@ -140,6 +144,7 @@ private fun applyPerformanceHudPreset(
             showBatteryLevel = false,
             showPowerDraw = false,
             showBatteryRuntime = false,
+            showBatteryTemperature = false,
             showClockTime = false,
             showCpuTemperature = false,
             showGpuTemperature = false,
@@ -156,6 +161,7 @@ private fun applyPerformanceHudPreset(
             showBatteryLevel = true,
             showPowerDraw = false,
             showBatteryRuntime = true,
+            showBatteryTemperature = true,
             showClockTime = false,
             showCpuTemperature = false,
             showGpuTemperature = false,
@@ -172,6 +178,7 @@ private fun applyPerformanceHudPreset(
             showBatteryLevel = true,
             showPowerDraw = true,
             showBatteryRuntime = true,
+            showBatteryTemperature = true,
             showClockTime = true,
             showCpuTemperature = true,
             showGpuTemperature = true,
@@ -194,6 +201,7 @@ private fun matchesPerformanceHudPreset(
         currentConfig.showBatteryLevel == presetConfig.showBatteryLevel &&
         currentConfig.showPowerDraw == presetConfig.showPowerDraw &&
         currentConfig.showBatteryRuntime == presetConfig.showBatteryRuntime &&
+        currentConfig.showBatteryTemperature == presetConfig.showBatteryTemperature &&
         currentConfig.showClockTime == presetConfig.showClockTime &&
         currentConfig.showCpuTemperature == presetConfig.showCpuTemperature &&
         currentConfig.showGpuTemperature == presetConfig.showGpuTemperature &&
@@ -206,11 +214,13 @@ private fun matchesPerformanceHudPreset(
 fun QuickMenu(
     isVisible: Boolean,
     onDismiss: () -> Unit,
-    onItemSelected: (Int) -> Unit,
+    onItemSelected: (Int) -> Boolean,
+    renderer: GLRenderer? = null,
     isPerformanceHudEnabled: Boolean = false,
     performanceHudConfig: PerformanceHudConfig = PerformanceHudConfig(),
     onPerformanceHudConfigChanged: (PerformanceHudConfig) -> Unit = {},
     hasPhysicalController: Boolean = false,
+    activeToggleIds: Set<Int> = emptySet(),
     modifier: Modifier = Modifier,
 ) {
     val exitGameItem = QuickMenuItem(
@@ -257,18 +267,21 @@ fun QuickMenu(
         )
     }
 
-    var selectedTab by rememberSaveable { mutableIntStateOf(QuickMenuTab.HUD) }
-    val selectedTabLabelResId = if (selectedTab == QuickMenuTab.HUD) {
-        R.string.performance_hud
-    } else {
-        R.string.quick_menu_tab_controller
+    var selectedTab by rememberSaveable(isVisible) { mutableIntStateOf(QuickMenuTab.HUD) }
+    val selectedTabLabelResId = when (selectedTab) {
+        QuickMenuTab.HUD -> R.string.performance_hud
+        QuickMenuTab.EFFECTS -> R.string.screen_effects
+        else -> R.string.quick_menu_tab_controller
     }
 
     val hudScrollState = rememberScrollState()
+    val effectsScrollState = rememberScrollState()
+    val effectsTabFocusRequester = remember { FocusRequester() }
     val controllerScrollState = rememberScrollState()
     val hudTabFocusRequester = remember { FocusRequester() }
     val controllerTabFocusRequester = remember { FocusRequester() }
     val hudItemFocusRequester = remember { FocusRequester() }
+    val effectsItemFocusRequester = remember { FocusRequester() }
     val controllerItemFocusRequester = remember { FocusRequester() }
 
     BackHandler(enabled = isVisible) {
@@ -373,6 +386,15 @@ fun QuickMenu(
                                     focusRequester = hudTabFocusRequester,
                                 )
                                 QuickMenuTabButton(
+                                    icon = Icons.Default.AutoFixHigh,
+                                    contentDescriptionResId = R.string.screen_effects,
+                                    selected = selectedTab == QuickMenuTab.EFFECTS,
+                                    accentColor = PluviaTheme.colors.accentPurple,
+                                    onSelected = { selectedTab = QuickMenuTab.EFFECTS },
+                                    modifier = Modifier.width(56.dp),
+                                    focusRequester = effectsTabFocusRequester,
+                                )
+                                QuickMenuTabButton(
                                     icon = Icons.Default.Gamepad,
                                     contentDescriptionResId = R.string.quick_menu_tab_controller,
                                     selected = selectedTab == QuickMenuTab.CONTROLLER,
@@ -395,7 +417,11 @@ fun QuickMenu(
 
                             QuickMenuRailActionButton(
                                 item = exitGameItem,
-                                onClick = { onItemSelected(QuickMenuAction.EXIT_GAME) },
+                                onClick = {
+                                    if (onItemSelected(QuickMenuAction.EXIT_GAME)) {
+                                        onDismiss()
+                                    }
+                                },
                                 modifier = Modifier.width(56.dp),
                             )
                         }
@@ -427,35 +453,65 @@ fun QuickMenu(
                             Box(
                                 modifier = Modifier.weight(1f),
                             ) {
-                                if (selectedTab == QuickMenuTab.HUD) {
-                                    PerformanceHudQuickMenuTab(
-                                        isPerformanceHudEnabled = isPerformanceHudEnabled,
-                                        performanceHudConfig = performanceHudConfig,
-                                        onTogglePerformanceHud = {
-                                            onItemSelected(QuickMenuAction.PERFORMANCE_HUD)
-                                        },
-                                        onPerformanceHudConfigChanged = onPerformanceHudConfigChanged,
-                                        scrollState = hudScrollState,
-                                        focusRequester = hudItemFocusRequester,
-                                        modifier = Modifier.fillMaxSize(),
-                                    )
-                                } else {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .verticalScroll(controllerScrollState)
-                                            .focusGroup(),
-                                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                                    ) {
-                                        controllerItems.forEachIndexed { index, item ->
-                                            QuickMenuItemRow(
-                                                item = item,
-                                                onClick = {
-                                                    onItemSelected(item.id)
-                                                    onDismiss()
-                                                },
-                                                focusRequester = if (index == 0) controllerItemFocusRequester else null,
+                                when (selectedTab) {
+                                    QuickMenuTab.HUD -> {
+                                        PerformanceHudQuickMenuTab(
+                                            isPerformanceHudEnabled = isPerformanceHudEnabled,
+                                            performanceHudConfig = performanceHudConfig,
+                                            onTogglePerformanceHud = {
+                                                onItemSelected(QuickMenuAction.PERFORMANCE_HUD)
+                                            },
+                                            onPerformanceHudConfigChanged = onPerformanceHudConfigChanged,
+                                            scrollState = hudScrollState,
+                                            focusRequester = hudItemFocusRequester,
+                                            modifier = Modifier.fillMaxSize(),
+                                        )
+                                    }
+
+                                    QuickMenuTab.EFFECTS -> {
+                                        if (renderer != null) {
+                                            ScreenEffectsTabContent(
+                                                renderer = renderer,
+                                                modifier = Modifier.fillMaxSize(),
+                                                firstItemFocusRequester = effectsItemFocusRequester,
+                                                scrollState = effectsScrollState,
                                             )
+                                        } else {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(horizontal = 8.dp, vertical = 16.dp),
+                                                contentAlignment = Alignment.TopStart,
+                                            ) {
+                                                Text(
+                                                    text = stringResource(R.string.main_loading),
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    else -> {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .verticalScroll(controllerScrollState)
+                                                .focusGroup(),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                                        ) {
+                                            controllerItems.forEachIndexed { index, item ->
+                                                QuickMenuItemRow(
+                                                    item = item,
+                                                    isActive = item.id in activeToggleIds,
+                                                    onClick = {
+                                                        if (onItemSelected(item.id)) {
+                                                            onDismiss()
+                                                        }
+                                                    },
+                                                    focusRequester = if (index == 0) controllerItemFocusRequester else null,
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -469,14 +525,9 @@ fun QuickMenu(
 
     LaunchedEffect(isVisible) {
         if (isVisible) {
-            val initialFocusRequester = if (selectedTab == QuickMenuTab.HUD) {
-                hudTabFocusRequester
-            } else {
-                controllerTabFocusRequester
-            }
             repeat(3) {
                 try {
-                    initialFocusRequester.requestFocus()
+                    hudItemFocusRequester.requestFocus()
                     return@LaunchedEffect
                 } catch (_: Exception) {
                     delay(80)
@@ -598,6 +649,41 @@ private fun PerformanceHudQuickMenuTab(
             accentColor = accentColor,
         )
 
+        QuickMenuAdjustmentRow(
+            title = stringResource(R.string.performance_hud_color_intensity),
+            valueText = stringResource(
+                R.string.performance_hud_percentage_value,
+                (performanceHudConfig.colorIntensity * 100f).roundToInt(),
+            ),
+            progress = normalizedProgress(performanceHudConfig.colorIntensity, 0f, 1f),
+            onDecrease = {
+                onPerformanceHudConfigChanged(
+                    performanceHudConfig.copy(
+                        colorIntensity = (performanceHudConfig.colorIntensity - 0.05f).coerceIn(0f, 1f),
+                    ),
+                )
+            },
+            onIncrease = {
+                onPerformanceHudConfigChanged(
+                    performanceHudConfig.copy(
+                        colorIntensity = (performanceHudConfig.colorIntensity + 0.05f).coerceIn(0f, 1f),
+                    ),
+                )
+            },
+            accentColor = accentColor,
+        )
+
+        QuickMenuToggleRow(
+            title = stringResource(R.string.performance_hud_text_outline),
+            enabled = performanceHudConfig.showTextOutline,
+            onToggle = {
+                onPerformanceHudConfigChanged(
+                    performanceHudConfig.copy(showTextOutline = !performanceHudConfig.showTextOutline),
+                )
+            },
+            accentColor = accentColor,
+        )
+
         Spacer(modifier = Modifier.height(8.dp))
 
         QuickMenuSectionHeader(
@@ -700,6 +786,16 @@ private fun PerformanceHudQuickMenuTab(
             onToggle = {
                 onPerformanceHudConfigChanged(
                     performanceHudConfig.copy(showBatteryRuntime = !performanceHudConfig.showBatteryRuntime),
+                )
+            },
+            accentColor = accentColor,
+        )
+        QuickMenuToggleRow(
+            title = stringResource(R.string.performance_hud_battery_temperature),
+            enabled = performanceHudConfig.showBatteryTemperature,
+            onToggle = {
+                onPerformanceHudConfigChanged(
+                    performanceHudConfig.copy(showBatteryTemperature = !performanceHudConfig.showBatteryTemperature),
                 )
             },
             accentColor = accentColor,
@@ -1392,6 +1488,7 @@ private fun QuickMenuSwitch(
 @Composable
 private fun QuickMenuItemRow(
     item: QuickMenuItem,
+    isActive: Boolean = false,
     onClick: () -> Unit,
     focusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
@@ -1470,11 +1567,16 @@ private fun QuickMenuItemRow(
         Box(
             modifier = Modifier
                 .size(40.dp)
+                .then(
+                    if (isActive) {
+                        Modifier.border(BorderStroke(2.dp, accentColor), CircleShape)
+                    } else Modifier
+                )
                 .clip(CircleShape)
                 .background(
                     when {
                         !isEnabled -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                        isFocused -> accentColor.copy(alpha = 0.2f)
+                        isFocused || isActive -> accentColor.copy(alpha = 0.2f)
                         else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     },
                 ),
@@ -1485,7 +1587,7 @@ private fun QuickMenuItemRow(
                 contentDescription = null,
                 tint = when {
                     !isEnabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = disabledAlpha)
-                    isFocused -> accentColor
+                    isFocused || isActive -> accentColor
                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                 },
                 modifier = Modifier.size(22.dp),
@@ -1513,7 +1615,7 @@ private fun Preview_QuickMenu() {
             QuickMenu(
                 isVisible = true,
                 onDismiss = {},
-                onItemSelected = {},
+                onItemSelected = { false },
                 hasPhysicalController = false,
             )
         }
@@ -1528,7 +1630,7 @@ private fun Preview_QuickMenu_WithController() {
             QuickMenu(
                 isVisible = true,
                 onDismiss = {},
-                onItemSelected = {},
+                onItemSelected = { false },
                 hasPhysicalController = true,
             )
         }

@@ -17,6 +17,9 @@ import android.view.WindowInsets
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.hardware.input.InputManager
+import android.view.InputDevice
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -371,6 +374,10 @@ fun XServerScreen(
     var showQuickMenu by remember { mutableStateOf(false) }
     var hasPhysicalController by remember { mutableStateOf(false) }
     var keepPausedForEditor by remember { mutableStateOf(false) }
+    var hasPhysicalKeyboard by remember { mutableStateOf(false) }
+    var hasPhysicalMouse by remember { mutableStateOf(false) }
+    var hasInternalTouchpad by remember { mutableStateOf(false) }
+    var hasUpdatedScreenGamepad by remember { mutableStateOf(false) }
     var isPerformanceHudEnabled by remember { mutableStateOf(PrefManager.showFps) }
 
     fun loadPerformanceHudConfig(): PerformanceHudConfig {
@@ -382,6 +389,7 @@ fun XServerScreen(
             showBatteryLevel = PrefManager.performanceHudShowBatteryLevel,
             showPowerDraw = PrefManager.performanceHudShowPowerDraw,
             showBatteryRuntime = PrefManager.performanceHudShowBatteryRuntime,
+            showBatteryTemperature = PrefManager.performanceHudShowBatteryTemperature,
             showClockTime = PrefManager.performanceHudShowClockTime,
             showCpuTemperature = PrefManager.performanceHudShowCpuTemperature,
             showGpuTemperature = PrefManager.performanceHudShowGpuTemperature,
@@ -389,6 +397,8 @@ fun XServerScreen(
             showCpuUsageGraph = PrefManager.performanceHudShowCpuUsageGraph,
             showGpuUsageGraph = PrefManager.performanceHudShowGpuUsageGraph,
             backgroundOpacity = PrefManager.performanceHudBackgroundOpacity,
+            colorIntensity = PrefManager.performanceHudColorIntensity,
+            showTextOutline = PrefManager.performanceHudShowTextOutline,
             size = PerformanceHudSize.fromPrefValue(PrefManager.performanceHudSize),
         )
     }
@@ -412,6 +422,7 @@ fun XServerScreen(
         PrefManager.performanceHudShowBatteryLevel = config.showBatteryLevel
         PrefManager.performanceHudShowPowerDraw = config.showPowerDraw
         PrefManager.performanceHudShowBatteryRuntime = config.showBatteryRuntime
+        PrefManager.performanceHudShowBatteryTemperature = config.showBatteryTemperature
         PrefManager.performanceHudShowClockTime = config.showClockTime
         PrefManager.performanceHudShowCpuTemperature = config.showCpuTemperature
         PrefManager.performanceHudShowGpuTemperature = config.showGpuTemperature
@@ -419,6 +430,8 @@ fun XServerScreen(
         PrefManager.performanceHudShowCpuUsageGraph = config.showCpuUsageGraph
         PrefManager.performanceHudShowGpuUsageGraph = config.showGpuUsageGraph
         PrefManager.performanceHudBackgroundOpacity = config.backgroundOpacity
+        PrefManager.performanceHudColorIntensity = config.colorIntensity
+        PrefManager.performanceHudShowTextOutline = config.showTextOutline
         PrefManager.performanceHudSize = config.size.prefValue
     }
 
@@ -643,6 +656,122 @@ fun XServerScreen(
         }
     }
 
+    val tryCapturePointer: () -> Boolean = {
+        // Only recapture when we have a physical mouse plugged in (or internal touchpad),
+        // no menus are open and we're not in Touchscreen mode
+        if ((hasPhysicalMouse || hasInternalTouchpad) &&
+            !showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode &&
+            !container.isTouchscreenMode) {
+            PluviaApp.touchpadView?.postDelayed({
+                val view = PluviaApp.touchpadView
+                if (view != null) {
+                    view.requestFocus()
+                    view.requestPointerCapture()
+                }
+            }, 100)
+            true
+        } else {
+            false
+        }
+    }
+
+    fun scanForExternalDevices() {
+        val deviceIds = InputDevice.getDeviceIds()
+        hasPhysicalKeyboard = deviceIds.any { id ->
+            val device = InputDevice.getDevice(id) ?: return@any false
+            val isExternal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) device.isExternal else true
+            Keyboard.isKeyboardDevice(device) && !device.isVirtual && isExternal
+        }
+        hasPhysicalMouse = deviceIds.any { id ->
+            val device = InputDevice.getDevice(id) ?: return@any false
+            val isMouse = device.supportsSource(InputDevice.SOURCE_MOUSE) || device.supportsSource(InputDevice.SOURCE_MOUSE_RELATIVE) ||
+                          device.supportsSource(InputDevice.SOURCE_TOUCHPAD)
+            val isExternal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) device.isExternal else true
+            isMouse && !device.isVirtual && isExternal
+        }
+        val controllerManager = ControllerManager.getInstance()
+        controllerManager.scanForDevices()
+        hasPhysicalController = controllerManager.getDetectedDevices().isNotEmpty()
+
+        if (!hasInternalTouchpad && !hasPhysicalMouse && !hasPhysicalKeyboard && !hasPhysicalController &&
+            !container.isTouchscreenMode) {
+            val manager = PluviaApp.inputControlsManager
+            val profiles = manager?.getProfiles(false) ?: listOf()
+
+            if (profiles.isNotEmpty()) {
+                // Use current profile (custom or Profile 0)
+                val profileIdStr = container.getExtra("profileId", "0")
+                val profileId = profileIdStr.toIntOrNull() ?: 0
+                val targetProfile = if (profileId != 0) {
+                    manager?.getProfile(profileId)
+                } else {
+                    null
+                } ?: manager?.getProfile(0) ?: profiles.getOrNull(2) ?: profiles.first()
+
+                if (!showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode) {
+                    Timber.d("No external devices attached, showing on-screen controls")
+                    if (!areControlsVisible) {
+                        showInputControls(targetProfile, xServerView!!.getxServer().winHandler, container)
+                        areControlsVisible = true
+                    }
+
+                    PluviaApp.touchpadView?.postDelayed({
+                        val view = PluviaApp.touchpadView
+                        if (view != null) {
+                            // Delay technically not required for the function to work but this can
+                            // race against tryCapturePointer() and end up capturing after release
+                            // was already called
+                            view.releasePointerCapture()
+                        }
+                    }, 100)
+                }
+                hasUpdatedScreenGamepad = false
+            }
+        }
+    }
+
+    fun evaluateDevice(device: InputDevice) {
+        // Some devices advertise all its capabilities on onInputDeviceAdded callback
+        // but some can also do basic advertise on onInputDeviceAdded and only expand on onInputDeviceChanged
+        val isExternal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) device.isExternal else true
+        if (!device.isVirtual && isExternal) {
+            if (Keyboard.isKeyboardDevice(device)) {
+                hasPhysicalKeyboard = true
+                if (!showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode &&
+                    !container.isTouchscreenMode &&
+                    !hasUpdatedScreenGamepad) {
+                    hasUpdatedScreenGamepad = true
+
+                    hideInputControls()
+                    areControlsVisible = false
+                }
+            }
+            val isMouse = device.supportsSource(InputDevice.SOURCE_MOUSE) ||
+                    device.supportsSource(InputDevice.SOURCE_MOUSE_RELATIVE) ||
+                    device.supportsSource(InputDevice.SOURCE_TOUCHPAD)
+            if (isMouse) {
+                hasPhysicalMouse = true
+                if (!hasUpdatedScreenGamepad && tryCapturePointer()) {
+                    hasUpdatedScreenGamepad = true
+
+                    hideInputControls()
+                    areControlsVisible = false
+                }
+            }
+        }
+        val isGamepad = ExternalController.isGameController(device)
+        if (isGamepad) {
+            if (!showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode &&
+                !container.isTouchscreenMode &&
+                !hasUpdatedScreenGamepad) {
+                hasUpdatedScreenGamepad = true
+
+                hideInputControls()
+                areControlsVisible = false
+            }
+        }
+    }
+
     val dismissOverlayMenu: () -> Unit = {
         if (!keyboardRequestedFromOverlay) {
             imeInputReceiver?.hideKeyboard()
@@ -659,7 +788,7 @@ fun XServerScreen(
         showQuickMenu = false
     }
 
-    val onQuickMenuItemSelected: (Int) -> Unit = { itemId ->
+    val onQuickMenuItemSelected: (Int) -> Boolean = { itemId ->
         when (itemId) {
             QuickMenuAction.KEYBOARD -> {
                 keyboardRequestedFromOverlay = true
@@ -686,6 +815,7 @@ fun XServerScreen(
                         show()
                     }
                 }
+                true
             }
 
             QuickMenuAction.INPUT_CONTROLS -> {
@@ -710,6 +840,7 @@ fun XServerScreen(
                     }
                 }
                 areControlsVisible = !areControlsVisible
+                true
             }
 
             QuickMenuAction.EDIT_CONTROLS -> {
@@ -785,12 +916,14 @@ fun XServerScreen(
                         areControlsVisible = true
                     }
                 }
+                true
             }
 
             QuickMenuAction.EDIT_PHYSICAL_CONTROLLER -> {
                 PostHog.capture(event = "edit_physical_controller_from_menu")
                 keepPausedForEditor = true
                 showPhysicalControllerDialog = true
+                true
             }
 
             QuickMenuAction.PERFORMANCE_HUD -> {
@@ -802,6 +935,7 @@ fun XServerScreen(
                     event = "performance_hud_toggled",
                     properties = mapOf("enabled" to enabled),
                 )
+                false
             }
 
             QuickMenuAction.EXIT_GAME -> {
@@ -816,7 +950,10 @@ fun XServerScreen(
                 // Resume processes before exiting so they can receive SIGTERM cleanly.
                 forceResumeIfSuspended()
                 exit(xServerView!!.getxServer().winHandler, PluviaApp.xEnvironment, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
+                true
             }
+
+            else -> false
         }
     }
 
@@ -852,8 +989,46 @@ fun XServerScreen(
         val controllerManager = ControllerManager.getInstance()
         controllerManager.scanForDevices()
         hasPhysicalController = controllerManager.getDetectedDevices().isNotEmpty()
+        PluviaApp.touchpadView?.postDelayed({
+            val view = PluviaApp.touchpadView
+            if (view != null) {
+                // Delay technically not required for the function to work but this can
+                // race against tryCapturePointer() and end up capturing after release
+                // was already called
+                view.releasePointerCapture()
+            }
+        }, 100)
 
         showQuickMenu = true
+    }
+
+    DisposableEffect(Unit) {
+        val inputManager = context.getSystemService(Context.INPUT_SERVICE) as InputManager
+
+        val deviceListener = object : InputManager.InputDeviceListener {
+            override fun onInputDeviceAdded(deviceId: Int) {
+                val device = InputDevice.getDevice(deviceId) ?: return
+                evaluateDevice(device)
+            }
+
+            override fun onInputDeviceRemoved(deviceId: Int) {
+                // Re-scan since we don't know which type was removed
+                scanForExternalDevices()
+            }
+
+            override fun onInputDeviceChanged(deviceId: Int) {
+                scanForExternalDevices()
+                val device = InputDevice.getDevice(deviceId) ?: return
+                evaluateDevice(device)
+            }
+        }
+
+        inputManager.registerInputDeviceListener(deviceListener, null)
+        scanForExternalDevices()
+
+        onDispose {
+            inputManager.unregisterInputDeviceListener(deviceListener)
+        }
     }
 
     DisposableEffect(container) {
@@ -888,8 +1063,9 @@ fun XServerScreen(
                     !keepPausedForEditor
             // logD("onKeyEvent(${it.event.device.sources})\n\tisGamepad: $isGamepad\n\tisKeyboard: $isKeyboard\n\t${it.event}")
 
-            if (waitingForManualResume && isGamepad) {
+            if (waitingForManualResume) {
                 when (it.event.keyCode) {
+                    KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_BUTTON_A,
                     KeyEvent.KEYCODE_BUTTON_START -> {
                         if (it.event.action == KeyEvent.ACTION_DOWN && it.event.repeatCount == 0) {
@@ -899,9 +1075,17 @@ fun XServerScreen(
                     }
                     else -> false
                 }
-            } else if (showQuickMenu && isGamepad) {
-                // Let Compose focus system handle gamepad navigation/selection while menu is visible.
-                false
+            } else if ((showElementEditor || keepPausedForEditor || showQuickMenu || isEditMode) && (isGamepad || isKeyboard)) {
+                val escPressed = isKeyboard && !keepPausedForEditor && it.event.keyCode == KeyEvent.KEYCODE_ESCAPE &&
+                        it.event.action == KeyEvent.ACTION_DOWN &&
+                        it.event.repeatCount == 0
+                if (escPressed) {
+                    (context as? ComponentActivity)?.onBackPressedDispatcher?.onBackPressed()
+                    true
+                } else {
+                    // Let Compose focus system handle keyboard and gamepad navigation/selection while menu is visible.
+                    false
+                }
             } else {
                 var handled = false
                 if (isGamepad) {
@@ -911,7 +1095,21 @@ fun XServerScreen(
                     if (!handled) handled = xServerView!!.getxServer().winHandler.onKeyEvent(it.event)
                 }
                 if (!handled && isKeyboard) {
-                    handled = keyboard?.onKeyEvent(it.event) == true
+                    val isShiftEscPressed = it.event.keyCode == KeyEvent.KEYCODE_ESCAPE &&
+                            it.event.isShiftPressed &&
+                            it.event.action == KeyEvent.ACTION_DOWN &&
+                            it.event.repeatCount == 0
+                    if (isShiftEscPressed &&
+                        !showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode) {
+                        gameBack()
+                        handled = true
+                    } else {
+                        if (it.event.device?.isVirtual == true) {
+                            handled = keyboard?.onVirtualKeyEvent(it.event) == true
+                        } else {
+                            handled = keyboard?.onKeyEvent(it.event) == true
+                        }
+                    }
                 }
                 handled
             }
@@ -919,7 +1117,7 @@ fun XServerScreen(
         val onMotionEvent: (AndroidEvent.MotionEvent) -> Boolean = {
             val isGamepad = ExternalController.isGameController(it.event?.device)
 
-            if (showQuickMenu && isGamepad) {
+            if ((showElementEditor || keepPausedForEditor || showQuickMenu || isEditMode) && isGamepad) {
                 // Let Compose consume any gamepad motion while menu is visible.
                 false
             } else {
@@ -930,8 +1128,23 @@ fun XServerScreen(
                     // Final fallback to WinHandler passthrough
                     if (!handled) handled = xServerView!!.getxServer().winHandler.onGenericMotionEvent(it.event)
                 }
-                if (!handled) {
-                    handled = PluviaApp.touchpadView?.onExternalMouseEvent(it.event) == true
+                if (PluviaApp.touchpadView?.hasPointerCapture() != true && !PluviaApp.isOverlayPaused) {
+                    if ((it.event != null) && (it.event.device != null)) {
+                        val device = it.event.device
+                        val isExternal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) device.isExternal else true
+                        if (device.supportsSource(InputDevice.SOURCE_TOUCHPAD) &&
+                            !isExternal) {
+                            // Samsung DeX Touchpad app
+                            hasInternalTouchpad = true
+                            if (!showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode &&
+                                !hasUpdatedScreenGamepad) {
+                                hasUpdatedScreenGamepad = true
+                                hideInputControls()
+                                areControlsVisible = false
+                            }
+                        }
+                        tryCapturePointer()
+                    }
                 }
                 handled
             }
@@ -1021,7 +1234,7 @@ fun XServerScreen(
         AndroidView(
         modifier = Modifier
             .fillMaxSize()
-            .pointerHoverIcon(PointerIcon(0))
+            .pointerHoverIcon(PointerIcon.Default)
             .pointerInteropFilter { event ->
                 val hud = performanceHudView
                 if (hud != null) {
@@ -1191,23 +1404,71 @@ fun XServerScreen(
                     getxServer().windowManager.removeOnWindowModificationListener(it)
                 }
                 val wmListener = object : WindowManager.OnWindowModificationListener {
+                        private fun isFrameRatingCandidateProperty(propertyName: String): Boolean {
+                            return propertyName.contains("_UTIL_LAYER") ||
+                                propertyName.contains("_MESA_DRV") ||
+                                (container.containerVariant.equals(Container.GLIBC) && propertyName.contains("_NET_WM_SURFACE"))
+                        }
+
+                        private fun describeFrameRatingWindow(window: Window): String {
+                            return "id=${window.id}, name=${window.name}, class=${window.className}, pid=${window.processId}"
+                        }
+
                         private fun changeFrameRatingVisibility(window: Window, property: Property?) {
-                            if (frameRating == null) return
+                            val rating = frameRating ?: return
                             if (property != null) {
-                                if (frameRatingWindowId == -1 && (
-                                            property.nameAsString().contains("_UTIL_LAYER") ||
-                                            property.nameAsString().contains("_MESA_DRV") ||
-                                            container.containerVariant.equals(Container.GLIBC) && property.nameAsString().contains("_NET_WM_SURFACE"))) {
-                                    frameRatingWindowId = window.id
-                                    (context as? Activity)?.runOnUiThread {
-                                        frameRating?.visibility = View.VISIBLE
+                                val propertyName = property.nameAsString()
+                                if (!isFrameRatingCandidateProperty(propertyName)) return
+
+                                when {
+                                    frameRatingWindowId == -1 -> {
+                                        frameRatingWindowId = window.id
+                                        Timber.i(
+                                            "FrameRating tracking attached via property=%s to %s",
+                                            propertyName,
+                                            describeFrameRatingWindow(window),
+                                        )
+                                        (context as? Activity)?.runOnUiThread {
+                                            frameRating?.visibility = View.VISIBLE
+                                        }
+                                        rating.update()
                                     }
-                                    frameRating?.update()
+                                    frameRatingWindowId == window.id -> {
+                                        Timber.d(
+                                            "FrameRating received candidate property=%s for already tracked window %s",
+                                            propertyName,
+                                            describeFrameRatingWindow(window),
+                                        )
+                                    }
+                                    else -> {
+                                        Timber.d(
+                                            "FrameRating ignoring candidate property=%s for %s because tracking already points to windowId=%d",
+                                            propertyName,
+                                            describeFrameRatingWindow(window),
+                                            frameRatingWindowId,
+                                        )
+                                    }
                                 }
-                            } else if (frameRatingWindowId != -1) {
-                                frameRatingWindowId = -1
-                                (context as? Activity)?.runOnUiThread {
-                                    frameRating?.visibility = View.GONE
+                                return
+                            }
+
+                            when {
+                                frameRatingWindowId == window.id -> {
+                                    Timber.i(
+                                        "FrameRating tracking cleared because tracked window unmapped: %s",
+                                        describeFrameRatingWindow(window),
+                                    )
+                                    frameRatingWindowId = -1
+                                    (context as? Activity)?.runOnUiThread {
+                                        frameRating?.visibility = View.GONE
+                                    }
+                                }
+                                frameRatingWindowId != -1 -> {
+                                    Timber.d(
+                                        "FrameRating ignoring unmap for non-tracked window %s; still tracking windowId=%d",
+                                        describeFrameRatingWindow(window),
+                                        frameRatingWindowId,
+                                    )
                                 }
                             }
                         }
@@ -1224,6 +1485,13 @@ fun XServerScreen(
                         }
 
                         override fun onModifyWindowProperty(window: Window, property: Property) {
+                            if (frameRating != null && isFrameRatingCandidateProperty(property.nameAsString())) {
+                                Timber.d(
+                                    "FrameRating observed candidate property=%s on %s",
+                                    property.nameAsString(),
+                                    describeFrameRatingWindow(window),
+                                )
+                            }
                             changeFrameRatingVisibility(window, property)
                         }
 
@@ -1586,10 +1854,12 @@ fun XServerScreen(
                         // Determine if controls should be shown based on priority:
                         // 1. If touchscreen mode is true → always hide
                         // 2. Else if physical controller detected → hide
-                        // 3. Else → show
+                        // 3. Else if physical mouse/keyboard detected → hide
+                        // 4. Else → show
                         val shouldShowControls = when {
                             container.isTouchscreenMode -> false
                             hasPhysicalController -> false
+                            hasPhysicalKeyboard || hasPhysicalMouse -> false
                             else -> true
                         }
 
@@ -1765,10 +2035,14 @@ fun XServerScreen(
             isVisible = showQuickMenu,
             onDismiss = dismissOverlayMenu,
             onItemSelected = onQuickMenuItemSelected,
+            renderer = xServerView?.renderer,
             isPerformanceHudEnabled = isPerformanceHudEnabled,
             performanceHudConfig = performanceHudConfig,
             onPerformanceHudConfigChanged = ::applyPerformanceHudConfig,
             hasPhysicalController = hasPhysicalController,
+            activeToggleIds = buildSet {
+                if (areControlsVisible) add(QuickMenuAction.INPUT_CONTROLS)
+            },
         )
 
         if (manualResumeMode && PluviaApp.isOverlayPaused && !showQuickMenu && !keepPausedForEditor) {
@@ -2073,7 +2347,6 @@ private fun showInputControls(profile: ControlsProfile, winHandler: WinHandler, 
     }
 
     PluviaApp.touchpadView?.setSensitivity(profile.getCursorSpeed() * 1.0f)
-    PluviaApp.touchpadView?.setPointerButtonRightEnabled(false)
 
 
     // If the selected profile is a virtual gamepad, we must enable the P1 slot.
@@ -2367,7 +2640,7 @@ private fun setupXEnvironment(
 
     if (container != null) {
         try {
-            GameFixesRegistry.applyFor(context, appId)
+            GameFixesRegistry.applyFor(context, appId, container)
         } catch (e: Exception) {
             Timber.tag("GameFixes").w(e, "Game fixes failed before launch")
         }
@@ -2624,6 +2897,7 @@ private fun setupXEnvironment(
         val achAppId = SteamService.cachedAchievementsAppId
         if (gameIdInt != null && achAppId != null) {
             val watchDirs = SteamService.getGseSaveDirs(context, gameIdInt)
+            val configDirectory = SteamService.findSteamSettingsDir(context, gameIdInt)
             val displayNameMap = SteamService.cachedAchievements?.associate { ach ->
                 ach.name to (ach.displayName?.get(container.language)
                     ?: ach.displayName?.get("english")
@@ -2634,8 +2908,13 @@ private fun setupXEnvironment(
                     "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/$achAppId/$it"
                 }
             } ?: emptyMap()
-            PluviaApp.achievementWatcher = AchievementWatcher(watchDirs, displayNameMap, iconUrlMap)
-                .also { it.start() }
+            PluviaApp.achievementWatcher = AchievementWatcher(
+                appId = gameIdInt,
+                watchDirs = watchDirs,
+                displayNameMap = displayNameMap,
+                iconUrlMap = iconUrlMap,
+                configDirectory = configDirectory,
+            ).also { it.start() }
         }
     }
 
@@ -2679,7 +2958,7 @@ private fun getWineStartCommand(
         }
         if (!container.isUseLegacyDRM){
             // Create ColdClientLoader.ini file
-            SteamUtils.writeColdClientIni(gameId, container)
+            SteamUtils.writeColdClientIni(gameId, container, appLaunchInfo)
         }
         val controllerVdfText = SteamService.resolveSteamControllerVdfText(gameId)
         if (controllerVdfText.isNullOrEmpty()) {
@@ -3197,10 +3476,10 @@ private fun installRedistributables(
     try {
         val steamAppId = ContainerUtils.extractGameIdFromContainerId(appId)
 
-        // Get shared depots to determine if redistributables are needed
+        val installedBranch = SteamService.getInstalledApp(steamAppId)?.branch ?: "public"
         val downloadableDepots = SteamService.getDownloadableDepots(steamAppId)
         val sharedDepots = downloadableDepots.filter { (_, depotInfo) ->
-            val manifest = depotInfo.manifests["public"]
+            val manifest = depotInfo.manifests[installedBranch]
             manifest == null || manifest.gid == 0L
         }
 
@@ -3513,6 +3792,22 @@ private fun setupWineSystemFiles(
         containerDataChanged = true
     }
 
+    // OpenAL audio: extract native DLLs if WINEDLLOVERRIDES mentions openal32 or soft_oal
+    val dllOverrides = EnvVars(container.envVars).get("WINEDLLOVERRIDES")
+    val needsOpenalDlls = dllOverrides.contains("openal32") || dllOverrides.contains("soft_oal")
+    val openalState = if (needsOpenalDlls) "yes" else "no"
+    if (openalState != container.getExtra("openal_dlls") || firstTimeBoot) {
+        if (needsOpenalDlls) {
+            val windowsDir = File(imageFs.rootDir, ImageFs.WINEPREFIX + "/drive_c/windows")
+            TarCompressorUtils.extract(
+                TarCompressorUtils.Type.ZSTD, context.assets,
+                "wincomponents/openal.tzst", windowsDir, onExtractFileListener,
+            )
+        }
+        container.putExtra("openal_dlls", openalState)
+        containerDataChanged = true
+    }
+
     if (container.isLaunchRealSteam){
         extractSteamFiles(context, container, onExtractFileListener)
     }
@@ -3525,7 +3820,7 @@ private fun setupWineSystemFiles(
     }
 
     WineStartMenuCreator.create(context, container)
-    WineUtils.createDosdevicesSymlinks(container)
+    WineUtils.createDosdevicesSymlinks(context, container)
 
     val startupSelection = container.startupSelection.toString()
     if (startupSelection != container.getExtra("startupSelection")) {
@@ -4187,6 +4482,8 @@ private fun changeWineAudioDriver(audioDriver: String, container: Container, ima
                 registryEditor.setStringValue("Software\\Wine\\Drivers", "Audio", "alsa")
             } else if (audioDriver == "pulseaudio") {
                 registryEditor.setStringValue("Software\\Wine\\Drivers", "Audio", "pulse")
+            } else if (audioDriver == "disabled") {
+                registryEditor.setStringValue("Software\\Wine\\Drivers", "Audio", "")
             }
         }
         container.putExtra("audioDriver", audioDriver)
