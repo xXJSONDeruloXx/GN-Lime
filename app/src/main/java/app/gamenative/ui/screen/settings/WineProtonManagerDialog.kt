@@ -2,6 +2,7 @@ package app.gamenative.ui.screen.settings
 
 import android.content.Context
 import android.net.Uri
+import app.gamenative.BuildConfig
 import app.gamenative.ui.util.SnackbarManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -1041,7 +1042,7 @@ private suspend fun loadWineProtonManifest(
     onError: suspend (String) -> Unit
 ) {
     try {
-        val manifestUrl = "https://downloads.gamenative.app/component-manifest.json"
+        val manifestUrl = BuildConfig.RUNTIME_COMPONENT_MANIFEST_URL
         val request = Request.Builder()
             .url(manifestUrl)
             .build()
