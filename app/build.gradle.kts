@@ -63,6 +63,9 @@ android {
         buildConfigField("String", "POSTHOG_HOST",  "\"${secret("POSTHOG_HOST")}\"")
         buildConfigField("String", "STEAMGRIDDB_API_KEY", "\"${secret("STEAMGRIDDB_API_KEY")}\"")
         buildConfigField("String", "CLOUD_PROJECT_NUMBER", "\"${secret("CLOUD_PROJECT_NUMBER")}\"")
+        buildConfigField("String", "RUNTIME_DOWNLOAD_BASE_URL", "\"https://github.com/xXJSONDeruloXx/gn-lime-runtime-assets/releases/download/runtime-2026-04-10\"")
+        buildConfigField("String", "RUNTIME_DOWNLOAD_FALLBACK_BASE_URL", "\"https://github.com/xXJSONDeruloXx/gn-lime-runtime-assets/releases/latest/download\"")
+        buildConfigField("String", "RUNTIME_COMPONENT_MANIFEST_URL", "\"https://raw.githubusercontent.com/xXJSONDeruloXx/gn-lime-runtime-assets/master/component-manifest.json\"")
         val iconValue = "@mipmap/ic_launcher"
         val iconRoundValue = "@mipmap/ic_launcher_round"
         manifestPlaceholders.putAll(

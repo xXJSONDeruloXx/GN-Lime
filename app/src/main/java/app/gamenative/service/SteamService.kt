@@ -1276,18 +1276,27 @@ class SteamService : Service(), IChallengeUrlChanged {
             context: Context,
             onProgress: (Float) -> Unit,
         ) = withContext(Dispatchers.IO) {
-            val primaryUrl = "https://downloads.gamenative.app/$fileName"
-            val fallbackUrl = "https://pub-9fcd5294bd0d4b85a9d73615bf98f3b5.r2.dev/$fileName"
+            val primaryBase = BuildConfig.RUNTIME_DOWNLOAD_BASE_URL.trimEnd('/')
+            val fallbackBase = BuildConfig.RUNTIME_DOWNLOAD_FALLBACK_BASE_URL.trimEnd('/')
+            val primaryUrl = "$primaryBase/$fileName"
+            val fallbackUrl = if (fallbackBase.isNotBlank()) "$fallbackBase/$fileName" else ""
             try {
                 fetchFile(primaryUrl, dest, onProgress)
             } catch (e: Exception) {
+                if (fallbackUrl.isBlank() || fallbackUrl == primaryUrl) {
+                    dest.delete()
+                    throw IOException(
+                        "Failed to download $fileName from $primaryUrl. Please check your network connection.",
+                        e,
+                    )
+                }
                 Timber.w(e, "Primary download failed; retrying with fallback URL")
                 try {
                     fetchFile(fallbackUrl, dest, onProgress)
                 } catch (e2: Exception) {
                     dest.delete()
                     throw IOException(
-                        "Failed to download $fileName. Please check your network connection or try a VPN.",
+                        "Failed to download $fileName from GN Lime mirrors. Please check your network connection.",
                         e2,
                     )
                 }
