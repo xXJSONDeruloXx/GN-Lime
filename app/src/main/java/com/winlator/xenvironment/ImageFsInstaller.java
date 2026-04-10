@@ -161,7 +161,7 @@ public abstract class ImageFsInstaller {
         });
     }
 
-    private static void installGuestLibs(Context ctx) {
+    public static void installGuestLibs(Context ctx) {
         final String ASSET_TAR = "redirect.tzst";          // ➊  add this to assets/
         File imagefs = new File(ctx.getFilesDir(), "imagefs");
         // ➋  Unpack straight into imagefs, preserving relative paths.
