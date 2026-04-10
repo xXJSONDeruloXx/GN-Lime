@@ -19,7 +19,7 @@ object IntentLaunchManager {
 
     private const val EXTRA_GAME_SOURCE = "game_source"
     private const val EXTRA_CONTAINER_CONFIG = "container_config"
-    private const val ACTION_LAUNCH_GAME = "app.gamenative.LAUNCH_GAME"
+    private const val ACTION_LAUNCH_GAME = "app.gnlime.LAUNCH_GAME"
     private const val MAX_CONFIG_JSON_SIZE = 50000 // 50KB limit to prevent memory exhaustion
 
     data class LaunchRequest(

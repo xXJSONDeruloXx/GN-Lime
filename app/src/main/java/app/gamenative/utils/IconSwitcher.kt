@@ -3,6 +3,7 @@ package app.gamenative.utils
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
+import app.gamenative.BuildConfig
 
 object IconSwitcher {
 
@@ -11,11 +12,11 @@ object IconSwitcher {
 
         val defaultAlias = ComponentName(
             context,
-            "app.gamenative.MainActivityAliasDefault",
+            BuildConfig.APPLICATION_ID + ".MainActivityAliasDefault",
         )
         val altAlias = ComponentName(
             context,
-            "app.gamenative.MainActivityAliasAlt",
+            BuildConfig.APPLICATION_ID + ".MainActivityAliasAlt",
         )
 
         val defaultState = if (useAltIcon)

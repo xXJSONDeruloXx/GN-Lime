@@ -47,7 +47,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "app.gamenative"
+        applicationId = "app.gnlime"
 
         minSdk = 26
         targetSdk = 28
