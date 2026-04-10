@@ -1,4 +1,4 @@
-name: Create tagged prerelease
+name: Create tagged release
 
 on:
   push:
@@ -7,13 +7,13 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: set up Java 17
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           java-version: "17"
@@ -26,7 +26,7 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Configure Keystore
+      - name: Configure release keystore
         env:
           KEYSTORE: ${{ secrets.KEYSTORE }}
           KEYSTORE_KEY_ALIAS: ${{ secrets.KEYSTORE_KEY_ALIAS }}
@@ -34,28 +34,15 @@ jobs:
           KEYSTORE_STORE_PASSWORD: ${{ secrets.KEYSTORE_STORE_PASSWORD }}
         run: |
           mkdir -p app/keystores
-          echo "$KEYSTORE" | base64 --decode > app/keystores/keystore
-          echo "storeFile=keystores/keystore" >> app/keystores/keystore.properties
-          echo "keyAlias=$KEYSTORE_KEY_ALIAS" >> app/keystores/keystore.properties
-          echo "storePassword=$KEYSTORE_STORE_PASSWORD" >> app/keystores/keystore.properties
-          echo "keyPassword=$KEYSTORE_KEY_PASSWORD" >> app/keystores/keystore.properties
-
-      - name: Configure Production Keystore
-        env:
-          PROD_KEYSTORE: ${{ secrets.PROD_KEYSTORE }}
-          PROD_KEYSTORE_KEY_ALIAS: ${{ secrets.PROD_KEYSTORE_KEY_ALIAS }}
-          PROD_KEYSTORE_KEY_PASSWORD: ${{ secrets.PROD_KEYSTORE_KEY_PASSWORD }}
-          PROD_KEYSTORE_STORE_PASSWORD: ${{ secrets.PROD_KEYSTORE_STORE_PASSWORD }}
-        run: |
-          mkdir -p app/keystores
-          echo "$PROD_KEYSTORE" | base64 --decode > app/keystores/prod.keystore
-          cat <<EOF > app/keystores/prod-keystore.properties
-          keyAlias=$PROD_KEYSTORE_KEY_ALIAS
-          keyPassword=$PROD_KEYSTORE_KEY_PASSWORD
-          storePassword=$PROD_KEYSTORE_STORE_PASSWORD
+          echo "$KEYSTORE" | base64 --decode > app/keystores/gnlime-release.jks
+          cat <<EOF > app/keystores/keystore.properties
+          storeFile=keystores/gnlime-release.jks
+          keyAlias=$KEYSTORE_KEY_ALIAS
+          storePassword=$KEYSTORE_STORE_PASSWORD
+          keyPassword=$KEYSTORE_KEY_PASSWORD
           EOF
 
-      - name: Inject credentials
+      - name: Inject optional local properties
         run: |
           cat <<EOF > local.properties
           POSTHOG_API_KEY=${{ secrets.POSTHOG_API_KEY }}
@@ -64,86 +51,22 @@ jobs:
           CLOUD_PROJECT_NUMBER=${{ secrets.CLOUD_PROJECT_NUMBER }}
           EOF
 
-      - name: Install Android SDK Build Tools
-        run: |
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -x "$SDKMANAGER" ]; then
-            SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          fi
-          yes | "$SDKMANAGER" --install "build-tools;34.0.0"
+      - name: Build signed release APK
+        run: ./gradlew :app:assembleRelease-signed
 
-      - name: Build with Gradle
-        run: ./gradlew :app:bundleRelease
-
-      - name: Extract APK from Bundle
-        run: |
-          java -jar tools/bundletool-all-1.17.2.jar build-apks \
-            --bundle=app/build/outputs/bundle/release/app-release.aab \
-            --output=app-release.apks \
-            --mode=universal
-          unzip -o app-release.apks universal.apk
-
-      - name: Copy lineage file
-        run: |
-          mkdir -p app/keystores
-          cp prod-debug.lineage app/keystores/prod-debug.lineage
-
-      - name: Dual sign universal APK
-        env:
-          DEBUG_ALIAS: ${{ secrets.KEYSTORE_KEY_ALIAS }}
-          DEBUG_KEY_PASS: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
-          DEBUG_STORE_PASS: ${{ secrets.KEYSTORE_STORE_PASSWORD }}
-          PROD_ALIAS: ${{ secrets.PROD_KEYSTORE_KEY_ALIAS }}
-          PROD_KEY_PASS: ${{ secrets.PROD_KEYSTORE_KEY_PASSWORD }}
-          PROD_STORE_PASS: ${{ secrets.PROD_KEYSTORE_STORE_PASSWORD }}
-        run: |
-          BUILD_TOOLS_DIR="${ANDROID_HOME}/build-tools/34.0.0"
-          if [ ! -d "$BUILD_TOOLS_DIR" ]; then
-            BUILD_TOOLS_DIR="${ANDROID_SDK_ROOT}/build-tools/34.0.0"
-          fi
-          "${BUILD_TOOLS_DIR}/apksigner" sign \
-            --lineage app/keystores/prod-debug.lineage \
-            --ks app/keystores/keystore \
-            --ks-key-alias "$DEBUG_ALIAS" \
-            --ks-pass pass:$DEBUG_STORE_PASS \
-            --key-pass pass:$DEBUG_KEY_PASS \
-            --next-signer --ks app/keystores/prod.keystore \
-            --ks-key-alias "$PROD_ALIAS" \
-            --ks-pass pass:$PROD_STORE_PASS \
-            --key-pass pass:$PROD_KEY_PASS \
-            --out universal-signed.apk \
-            universal.apk
-          mv universal-signed.apk universal.apk
-
-      - name: Upload APK for next job
-        uses: actions/upload-artifact@v4
-        with:
-          name: universal-apk
-          path: universal.apk
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Download built APK
-        uses: actions/download-artifact@v4
-        with:
-          name: universal-apk
-          path: ./
-
-      - name: Rename APK
+      - name: Rename APK for release
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          mv universal.apk "gamenative-$TAG.apk"
+          APK=$(find app/build/outputs/apk/release-signed -name '*.apk' | head -n 1)
+          cp "$APK" "GN-Lime-${TAG}.apk"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          prerelease: true
+          prerelease: false
           generate_release_notes: true
-          files: gamenative-${{ github.ref_name }}.apk
+          files: GN-Lime-${{ github.ref_name }}.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
