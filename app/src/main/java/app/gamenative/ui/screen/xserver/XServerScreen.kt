@@ -1734,7 +1734,18 @@ fun XServerScreen(
                     Timber.d("=== Profile Loading Complete ===")
                     setProfile(targetProfile)
 
-                    physicalControllerHandler = PhysicalControllerHandler(targetProfile, xServerView.getxServer(), gameBack)
+                    physicalControllerHandler = PhysicalControllerHandler(
+                        targetProfile,
+                        xServerView.getxServer(),
+                        gameBack,
+                        onTogglePerformanceHud = {
+                            val enabled = !isPerformanceHudEnabled
+                            isPerformanceHudEnabled = enabled
+                            PrefManager.showFps = enabled
+                            updatePerformanceHud(enabled)
+                        },
+                        isPerformanceHudHotkeyEnabled = { PrefManager.performanceHudHotkeyEnabled },
+                    )
 
                     // Store profile for auto-show logic
                     loadedProfile = targetProfile
@@ -2040,6 +2051,10 @@ fun XServerScreen(
             performanceHudConfig = performanceHudConfig,
             onPerformanceHudConfigChanged = ::applyPerformanceHudConfig,
             hasPhysicalController = hasPhysicalController,
+            isPerformanceHudHotkeyEnabled = PrefManager.performanceHudHotkeyEnabled,
+            onPerformanceHudHotkeyToggled = {
+                PrefManager.performanceHudHotkeyEnabled = !PrefManager.performanceHudHotkeyEnabled
+            },
             activeToggleIds = buildSet {
                 if (areControlsVisible) add(QuickMenuAction.INPUT_CONTROLS)
             },

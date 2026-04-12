@@ -220,6 +220,8 @@ fun QuickMenu(
     performanceHudConfig: PerformanceHudConfig = PerformanceHudConfig(),
     onPerformanceHudConfigChanged: (PerformanceHudConfig) -> Unit = {},
     hasPhysicalController: Boolean = false,
+    isPerformanceHudHotkeyEnabled: Boolean = false,
+    onPerformanceHudHotkeyToggled: () -> Unit = {},
     activeToggleIds: Set<Int> = emptySet(),
     modifier: Modifier = Modifier,
 ) {
@@ -462,6 +464,8 @@ fun QuickMenu(
                                                 onItemSelected(QuickMenuAction.PERFORMANCE_HUD)
                                             },
                                             onPerformanceHudConfigChanged = onPerformanceHudConfigChanged,
+                                            isHotkeyEnabled = isPerformanceHudHotkeyEnabled,
+                                            onHotkeyToggled = onPerformanceHudHotkeyToggled,
                                             scrollState = hudScrollState,
                                             focusRequester = hudItemFocusRequester,
                                             modifier = Modifier.fillMaxSize(),
@@ -543,6 +547,8 @@ private fun PerformanceHudQuickMenuTab(
     performanceHudConfig: PerformanceHudConfig,
     onTogglePerformanceHud: () -> Unit,
     onPerformanceHudConfigChanged: (PerformanceHudConfig) -> Unit,
+    isHotkeyEnabled: Boolean = false,
+    onHotkeyToggled: () -> Unit = {},
     scrollState: ScrollState,
     focusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
@@ -562,6 +568,14 @@ private fun PerformanceHudQuickMenuTab(
             onToggle = onTogglePerformanceHud,
             accentColor = accentColor,
             focusRequester = focusRequester,
+        )
+
+        QuickMenuToggleRow(
+            title = stringResource(R.string.performance_hud_hotkey_toggle),
+            subtitle = stringResource(R.string.performance_hud_hotkey_description),
+            enabled = isHotkeyEnabled,
+            onToggle = onHotkeyToggled,
+            accentColor = accentColor,
         )
 
         Spacer(modifier = Modifier.height(8.dp))

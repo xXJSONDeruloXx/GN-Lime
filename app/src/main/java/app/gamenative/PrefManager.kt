@@ -307,6 +307,13 @@ object PrefManager {
             setPref(SHOW_FPS, value)
         }
 
+    private val PERFORMANCE_HUD_HOTKEY_ENABLED = booleanPreferencesKey("performance_hud_hotkey_enabled")
+    var performanceHudHotkeyEnabled: Boolean
+        get() = getPref(PERFORMANCE_HUD_HOTKEY_ENABLED, false)
+        set(value) {
+            setPref(PERFORMANCE_HUD_HOTKEY_ENABLED, value)
+        }
+
     private val PERFORMANCE_HUD_COMPACT_MODE = booleanPreferencesKey("performance_hud_compact_mode")
     var performanceHudCompactMode: Boolean
         get() = getPref(PERFORMANCE_HUD_COMPACT_MODE, false)
