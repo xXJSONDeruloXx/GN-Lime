@@ -1192,4 +1192,8 @@ object PrefManager {
         get() = getPref(ACHIEVEMENT_SOUND_URI, "")
         set(value) { setPref(ACHIEVEMENT_SOUND_URI, value) }
 
+    private val WARN_BEFORE_EXIT = booleanPreferencesKey("warn_before_exit")
+    var warnBeforeExit: Boolean
+        get() = getPref(WARN_BEFORE_EXIT, false)
+        set(value) { setPref(WARN_BEFORE_EXIT, value) }
 }
