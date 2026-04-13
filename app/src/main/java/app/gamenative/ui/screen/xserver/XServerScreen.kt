@@ -1581,6 +1581,11 @@ fun XServerScreen(
                                 if (!container.isDisableMouseInput && !container.isTouchscreenMode) renderer?.setCursorVisible(true)
                                 xServerState.value.winStarted = true
                             }
+                            if (window.id == frameRatingWindowId) {
+                                (context as? Activity)?.runOnUiThread {
+                                    frameRating?.update()
+                                }
+                            }
                         }
 
                         override fun onModifyWindowProperty(window: Window, property: Property) {
