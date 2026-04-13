@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.opengl.GLUtils;
+import android.view.View;
 
 // import com.winlator.R;
 // import com.winlator.XrActivity;
@@ -16,6 +17,7 @@ import com.winlator.renderer.material.CursorMaterial;
 import com.winlator.renderer.material.ShaderMaterial;
 import com.winlator.renderer.material.ShadowMaterial;
 import com.winlator.renderer.material.WindowMaterial;
+import com.winlator.widget.FrameRating;
 import com.winlator.widget.XServerView;
 import com.winlator.xserver.Bitmask;
 import com.winlator.xserver.Cursor;
@@ -55,11 +57,14 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
     private boolean magnifierEnabled = true;
     private int surfaceWidth;
     private int surfaceHeight;
+    private int renderTargetWidthOverride = 0;
+    private int renderTargetHeightOverride = 0;
     private boolean sceneInitialized = false;
     private final EffectComposer effectComposer;
     private Bitmap backdropBitmap;
     private int backdropTextureId = 0;
     private boolean backdropTextureDirty = false;
+    private FrameRating frameRating;
 
     public GLRenderer(XServerView xServerView, XServer xServer) {
         this.xServerView = xServerView;
@@ -139,23 +144,41 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         else {
             drawScene();
         }
+
+        if (frameRating != null && frameRating.getVisibility() == View.VISIBLE) {
+            frameRating.update();
+        }
     }
 
     void drawScene() {
         boolean xrFrame = false;
         // if (XrActivity.isSupported()) xrFrame = XrActivity.getInstance().beginFrame(XrActivity.getImmersive(), XrActivity.getSBS());
 
-        if (viewportNeedsUpdate && magnifierEnabled) {
-            applyCurrentViewport();
+        int targetWidth = renderTargetWidthOverride > 0 ? renderTargetWidthOverride : surfaceWidth;
+        int targetHeight = renderTargetHeightOverride > 0 ? renderTargetHeightOverride : surfaceHeight;
+        boolean renderingToOffscreenTarget = renderTargetWidthOverride > 0 && renderTargetHeightOverride > 0;
+        float viewportScaleX = surfaceWidth > 0 ? (float) targetWidth / (float) surfaceWidth : 1.0f;
+        float viewportScaleY = surfaceHeight > 0 ? (float) targetHeight / (float) surfaceHeight : 1.0f;
+
+        if (viewportNeedsUpdate) {
+            if (renderingToOffscreenTarget || fullscreen || magnifierEnabled) {
+                applyCurrentViewport(targetWidth, targetHeight, renderingToOffscreenTarget, viewportScaleX, viewportScaleY);
+            }
             viewportNeedsUpdate = false;
         }
 
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-        renderBackdrop();
-        renderViewportShadow();
-        if (magnifierEnabled) applyCurrentViewport();
-
+        renderBackdrop(targetWidth, targetHeight);
+        renderViewportShadow(targetWidth, targetHeight, viewportScaleX, viewportScaleY);
         if (magnifierEnabled) {
+            applyCurrentViewport(targetWidth, targetHeight, renderingToOffscreenTarget, viewportScaleX, viewportScaleY);
+        }
+
+        if (renderingToOffscreenTarget) {
+            GLES20.glDisable(GLES20.GL_SCISSOR_TEST);
+            XForm.identity(tmpXForm2);
+        }
+        else if (magnifierEnabled) {
             float pointerX = 0;
             float pointerY = 0;
             float magnifierZoom = !screenOffsetYRelativeToCursor ? this.magnifierZoom : 1.0f;
@@ -183,7 +206,12 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
                 XForm.makeTransform(tmpXForm2, viewTransformation.sceneOffsetX, viewTransformation.sceneOffsetY - pointerY, viewTransformation.sceneScaleX, viewTransformation.sceneScaleY, 0);
 
                 GLES20.glEnable(GLES20.GL_SCISSOR_TEST);
-                GLES20.glScissor(viewTransformation.viewOffsetX, viewTransformation.viewOffsetY, viewTransformation.viewWidth, viewTransformation.viewHeight);
+                GLES20.glScissor(
+                    Math.round(viewTransformation.viewOffsetX * viewportScaleX),
+                    Math.round(viewTransformation.viewOffsetY * viewportScaleY),
+                    Math.round(viewTransformation.viewWidth * viewportScaleX),
+                    Math.round(viewTransformation.viewHeight * viewportScaleY)
+                );
             }
             else XForm.identity(tmpXForm2);
         }
@@ -191,7 +219,7 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         renderWindows();
         if (cursorVisible) renderCursor();
 
-        if (!magnifierEnabled && !fullscreen) GLES20.glDisable(GLES20.GL_SCISSOR_TEST);
+        if ((!magnifierEnabled && !fullscreen) || renderingToOffscreenTarget) GLES20.glDisable(GLES20.GL_SCISSOR_TEST);
 
         if (xrFrame) {
             // XrActivity.getInstance().endFrame();
@@ -270,12 +298,17 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         }
     }
 
-    private void applyCurrentViewport() {
-        if (fullscreen) {
-            GLES20.glViewport(0, 0, surfaceWidth, surfaceHeight);
+    private void applyCurrentViewport(int targetWidth, int targetHeight, boolean renderingToOffscreenTarget, float viewportScaleX, float viewportScaleY) {
+        if (renderingToOffscreenTarget || fullscreen) {
+            GLES20.glViewport(0, 0, targetWidth, targetHeight);
         }
         else {
-            GLES20.glViewport(viewTransformation.viewOffsetX, viewTransformation.viewOffsetY, viewTransformation.viewWidth, viewTransformation.viewHeight);
+            GLES20.glViewport(
+                    Math.round(viewTransformation.viewOffsetX * viewportScaleX),
+                    Math.round(viewTransformation.viewOffsetY * viewportScaleY),
+                    Math.round(viewTransformation.viewWidth * viewportScaleX),
+                    Math.round(viewTransformation.viewHeight * viewportScaleY)
+            );
         }
     }
 
@@ -308,22 +341,22 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         backdropTextureId = 0;
     }
 
-    private void renderBackdrop() {
-        if (backdropBitmap == null || surfaceWidth <= 0 || surfaceHeight <= 0) return;
+    private void renderBackdrop(int targetWidth, int targetHeight) {
+        if (backdropBitmap == null || targetWidth <= 0 || targetHeight <= 0) return;
 
         ensureBackdropTexture();
         if (backdropTextureId == 0) return;
 
-        GLES20.glViewport(0, 0, surfaceWidth, surfaceHeight);
+        GLES20.glViewport(0, 0, targetWidth, targetHeight);
         windowMaterial.use();
-        GLES20.glUniform2f(windowMaterial.getUniformLocation("viewSize"), surfaceWidth, surfaceHeight);
+        GLES20.glUniform2f(windowMaterial.getUniformLocation("viewSize"), targetWidth, targetHeight);
         quadVertices.bind(windowMaterial.programId);
 
-        float scale = Math.max((float) surfaceWidth / backdropBitmap.getWidth(), (float) surfaceHeight / backdropBitmap.getHeight());
+        float scale = Math.max((float) targetWidth / backdropBitmap.getWidth(), (float) targetHeight / backdropBitmap.getHeight());
         float drawWidth = backdropBitmap.getWidth() * scale;
         float drawHeight = backdropBitmap.getHeight() * scale;
-        float drawX = (surfaceWidth - drawWidth) * 0.5f;
-        float drawY = (surfaceHeight - drawHeight) * 0.5f;
+        float drawX = (targetWidth - drawWidth) * 0.5f;
+        float drawY = (targetHeight - drawHeight) * 0.5f;
 
         XForm.set(tmpXForm1, drawX, drawY, drawWidth, drawHeight);
 
@@ -347,28 +380,31 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, quadVertices.count());
     }
 
-    private void renderViewportShadow() {
-        if (fullscreen || surfaceWidth <= 0 || surfaceHeight <= 0) return;
-        if (viewTransformation.viewWidth >= surfaceWidth && viewTransformation.viewHeight >= surfaceHeight) return;
+    private void renderViewportShadow(int targetWidth, int targetHeight, float viewportScaleX, float viewportScaleY) {
+        if (fullscreen || targetWidth <= 0 || targetHeight <= 0) return;
 
-        float sideShadowSize = Math.max(22.0f, 34.0f * viewTransformation.aspect);
-        float verticalShadowSize = Math.max(26.0f, 42.0f * viewTransformation.aspect);
+        float scaledViewWidth = viewTransformation.viewWidth * viewportScaleX;
+        float scaledViewHeight = viewTransformation.viewHeight * viewportScaleY;
+        if (scaledViewWidth >= targetWidth && scaledViewHeight >= targetHeight) return;
+
+        float sideShadowSize = Math.max(22.0f * viewportScaleX, 34.0f * viewTransformation.aspect * viewportScaleX);
+        float verticalShadowSize = Math.max(26.0f * viewportScaleY, 42.0f * viewTransformation.aspect * viewportScaleY);
         float sideShadowAlpha = 0.50f;
         float verticalShadowAlpha = 0.58f;
-        float left = viewTransformation.viewOffsetX;
-        float top = viewTransformation.viewOffsetY;
-        float right = left + viewTransformation.viewWidth;
-        float bottom = top + viewTransformation.viewHeight;
+        float left = viewTransformation.viewOffsetX * viewportScaleX;
+        float top = viewTransformation.viewOffsetY * viewportScaleY;
+        float right = left + scaledViewWidth;
+        float bottom = top + scaledViewHeight;
 
-        GLES20.glViewport(0, 0, surfaceWidth, surfaceHeight);
+        GLES20.glViewport(0, 0, targetWidth, targetHeight);
         shadowMaterial.use();
-        shadowMaterial.setUniformVec2("viewSize", surfaceWidth, surfaceHeight);
+        shadowMaterial.setUniformVec2("viewSize", targetWidth, targetHeight);
         quadVertices.bind(shadowMaterial.programId);
 
-        renderShadowQuad(left - sideShadowSize, top, sideShadowSize, viewTransformation.viewHeight, 1.0f, 0.0f, 0.0f, 0.0f, sideShadowAlpha);
-        renderShadowQuad(right, top, sideShadowSize, viewTransformation.viewHeight, 0.0f, 1.0f, 0.0f, 0.0f, sideShadowAlpha);
-        renderShadowQuad(left, top - verticalShadowSize, viewTransformation.viewWidth, verticalShadowSize, 0.0f, 0.0f, 1.0f, 0.0f, verticalShadowAlpha);
-        renderShadowQuad(left, bottom, viewTransformation.viewWidth, verticalShadowSize, 0.0f, 0.0f, 0.0f, 1.0f, verticalShadowAlpha);
+        renderShadowQuad(left - sideShadowSize, top, sideShadowSize, scaledViewHeight, 1.0f, 0.0f, 0.0f, 0.0f, sideShadowAlpha);
+        renderShadowQuad(right, top, sideShadowSize, scaledViewHeight, 0.0f, 1.0f, 0.0f, 0.0f, sideShadowAlpha);
+        renderShadowQuad(left, top - verticalShadowSize, scaledViewWidth, verticalShadowSize, 0.0f, 0.0f, 1.0f, 0.0f, verticalShadowAlpha);
+        renderShadowQuad(left, bottom, scaledViewWidth, verticalShadowSize, 0.0f, 0.0f, 0.0f, 1.0f, verticalShadowAlpha);
 
         quadVertices.disable();
     }
@@ -575,6 +611,14 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         return surfaceHeight;
     }
 
+    public int getXServerWidth() {
+        return xServer.screenInfo.width;
+    }
+
+    public int getXServerHeight() {
+        return xServer.screenInfo.height;
+    }
+
     public VertexAttribute getQuadVertices() {
         return quadVertices;
     }
@@ -583,7 +627,23 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         this.viewportNeedsUpdate = viewportNeedsUpdate;
     }
 
+    public void setRenderTargetSizeOverride(int width, int height) {
+        renderTargetWidthOverride = width;
+        renderTargetHeightOverride = height;
+        viewportNeedsUpdate = true;
+    }
+
+    public void clearRenderTargetSizeOverride() {
+        renderTargetWidthOverride = 0;
+        renderTargetHeightOverride = 0;
+        viewportNeedsUpdate = true;
+    }
+
     public EffectComposer getEffectComposer() {
         return effectComposer;
+    }
+
+    public void setFrameRating(FrameRating frameRating) {
+        this.frameRating = frameRating;
     }
 }
