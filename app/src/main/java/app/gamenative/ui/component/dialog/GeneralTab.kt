@@ -309,35 +309,44 @@ fun GeneralTabContent(
             onCheckedChange = { state.config.value = config.copy(portraitMode = it) },
         )
         if (!state.isDefaultConfig) {
-            SettingsMenuLink(
-                colors = settingsTileColors(),
-                title = { Text(text = stringResource(R.string.backdrop_image)) },
-                subtitle = {
-                    Text(
-                        text = if (config.backdropImageUri.isNotEmpty()) {
-                            stringResource(R.string.backdrop_image_selected)
-                        } else {
-                            stringResource(R.string.backdrop_image_description)
-                        },
-                    )
-                },
-                onClick = { state.launchBackdropImagePicker() },
-                action = if (config.backdropImageUri.isNotEmpty()) {
-                    {
-                        IconButton(
-                            onClick = { state.clearBackdropImage() },
-                            content = {
-                                Icon(
-                                    imageVector = Icons.Filled.Delete,
-                                    contentDescription = stringResource(R.string.clear_backdrop_image),
-                                )
+            SettingsSwitch(
+                colors = settingsTileColorsAlt(),
+                title = { Text(text = stringResource(R.string.backdrop_images)) },
+                subtitle = { Text(text = stringResource(R.string.backdrop_images_description)) },
+                state = config.enableBackdropImage,
+                onCheckedChange = { state.config.value = config.copy(enableBackdropImage = it) },
+            )
+            if (config.enableBackdropImage) {
+                SettingsMenuLink(
+                    colors = settingsTileColors(),
+                    title = { Text(text = stringResource(R.string.backdrop_image)) },
+                    subtitle = {
+                        Text(
+                            text = if (config.backdropImageUri.isNotEmpty()) {
+                                stringResource(R.string.backdrop_image_selected)
+                            } else {
+                                stringResource(R.string.backdrop_image_description)
                             },
                         )
-                    }
-                } else {
-                    null
-                },
-            )
+                    },
+                    onClick = { state.launchBackdropImagePicker() },
+                    action = if (config.backdropImageUri.isNotEmpty()) {
+                        {
+                            IconButton(
+                                onClick = { state.clearBackdropImage() },
+                                content = {
+                                    Icon(
+                                        imageVector = Icons.Filled.Delete,
+                                        contentDescription = stringResource(R.string.clear_backdrop_image),
+                                    )
+                                },
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                )
+            }
         }
         SettingsListDropdown(
             colors = settingsTileColors(),

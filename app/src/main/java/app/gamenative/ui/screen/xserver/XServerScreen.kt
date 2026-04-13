@@ -256,6 +256,10 @@ private suspend fun resolveBackdropImageModels(
     container: Container,
     steamAppInfo: SteamApp?,
 ): List<String> = withContext(Dispatchers.IO) {
+    if (!container.getExtra("enableBackdropImage", "false").toBoolean()) {
+        return@withContext emptyList()
+    }
+
     val models = linkedSetOf<String>()
 
     val userUri = container.getExtra("backdropImageUri", "").trim()

@@ -51,6 +51,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -119,6 +120,86 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 import kotlin.math.roundToInt
+
+private data class BackdropImageController(
+    val launchPicker: () -> Unit,
+    val clearImage: () -> Unit,
+    val dismissWithCleanup: () -> Unit,
+    val saveWithCleanup: () -> Unit,
+)
+
+private fun releaseBackdropPermission(context: android.content.Context, uriString: String) {
+    if (uriString.isBlank()) return
+    try {
+        context.contentResolver.releasePersistableUriPermission(
+            Uri.parse(uriString),
+            Intent.FLAG_GRANT_READ_URI_PERMISSION,
+        )
+    } catch (_: SecurityException) {
+        // Ignore if no persisted grant exists for this Uri.
+    }
+}
+
+private fun clearUnsavedBackdropPermission(
+    context: android.content.Context,
+    initialBackdropImageUri: String,
+    currentUri: String,
+) {
+    if (currentUri.isNotBlank() && currentUri != initialBackdropImageUri) {
+        releaseBackdropPermission(context, currentUri)
+    }
+}
+
+@Composable
+private fun rememberBackdropImageController(
+    context: android.content.Context,
+    initialBackdropImageUri: String,
+    configState: MutableState<ContainerData>,
+    onDismissRequest: () -> Unit,
+    onSave: (ContainerData) -> Unit,
+): BackdropImageController {
+    var config by configState
+
+    val backdropImagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        val newUri = uri.toString()
+        val previousUri = config.backdropImageUri
+        if (previousUri.isNotBlank() && previousUri != initialBackdropImageUri && previousUri != newUri) {
+            releaseBackdropPermission(context, previousUri)
+        }
+        try {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        } catch (_: SecurityException) {
+            // Some providers don't support persistable permissions; best-effort only.
+        }
+        config = config.copy(backdropImageUri = newUri)
+    }
+
+    return BackdropImageController(
+        launchPicker = {
+            backdropImagePickerLauncher.launch(arrayOf("image/*"))
+        },
+        clearImage = {
+            clearUnsavedBackdropPermission(context, initialBackdropImageUri, config.backdropImageUri)
+            config = config.copy(backdropImageUri = "")
+        },
+        dismissWithCleanup = {
+            clearUnsavedBackdropPermission(context, initialBackdropImageUri, config.backdropImageUri)
+            onDismissRequest()
+        },
+        saveWithCleanup = {
+            if (config.backdropImageUri != initialBackdropImageUri && initialBackdropImageUri.isNotBlank()) {
+                releaseBackdropPermission(context, initialBackdropImageUri)
+            }
+            onSave(config)
+        },
+    )
+}
 
 /**
  * Gets the component title for Win Components settings group.
@@ -835,44 +916,13 @@ fun ContainerConfigDialog(
         ) { }
 
         val initialBackdropImageUri = initialConfig.backdropImageUri
-
-        fun releaseBackdropPermission(uriString: String) {
-            if (uriString.isBlank()) return
-            try {
-                context.contentResolver.releasePersistableUriPermission(
-                    Uri.parse(uriString),
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                )
-            } catch (_: SecurityException) {
-                // Ignore if no persisted grant exists for this Uri.
-            }
-        }
-
-        fun clearUnsavedBackdropPermission(currentUri: String) {
-            if (currentUri.isNotBlank() && currentUri != initialBackdropImageUri) {
-                releaseBackdropPermission(currentUri)
-            }
-        }
-
-        val backdropImagePickerLauncher = rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.OpenDocument(),
-        ) { uri ->
-            uri ?: return@rememberLauncherForActivityResult
-            val newUri = uri.toString()
-            val previousUri = config.backdropImageUri
-            if (previousUri.isNotBlank() && previousUri != initialBackdropImageUri && previousUri != newUri) {
-                releaseBackdropPermission(previousUri)
-            }
-            try {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                )
-            } catch (_: SecurityException) {
-                // Some providers don't support persistable permissions; best-effort only.
-            }
-            config = config.copy(backdropImageUri = newUri)
-        }
+        val backdropImageController = rememberBackdropImageController(
+            context = context,
+            initialBackdropImageUri = initialBackdropImageUri,
+            configState = configState,
+            onDismissRequest = onDismissRequest,
+            onSave = onSave,
+        )
 
         val folderPicker = rememberCustomGameFolderPicker(
             onPathSelected = { path ->
@@ -926,18 +976,6 @@ fun ContainerConfigDialog(
                 screenSizes[screenSizeIndex].split(" ")[0]
             }
             config = config.copy(screenSize = screenSize)
-        }
-
-        val dismissWithBackdropCleanup: () -> Unit = {
-            clearUnsavedBackdropPermission(config.backdropImageUri)
-            onDismissRequest()
-        }
-
-        val saveWithBackdropCleanup: () -> Unit = {
-            if (config.backdropImageUri != initialBackdropImageUri && initialBackdropImageUri.isNotBlank()) {
-                releaseBackdropPermission(initialBackdropImageUri)
-            }
-            onSave(config)
         }
 
         val onDismissCheck: () -> Unit = {
@@ -1087,13 +1125,8 @@ fun ContainerConfigDialog(
                 SteamService.keepAlive = true
                 folderPicker.launchPicker()
             },
-            launchBackdropImagePicker = {
-                backdropImagePickerLauncher.launch(arrayOf("image/*"))
-            },
-            clearBackdropImage = {
-                clearUnsavedBackdropPermission(config.backdropImageUri)
-                config = config.copy(backdropImageUri = "")
-            },
+            launchBackdropImagePicker = backdropImageController.launchPicker,
+            clearBackdropImage = backdropImageController.clearImage,
             getVersionsForDriver = { getVersionsForDriver() },
             getVersionsForBox64 = { getVersionsForBox64() },
             applyScreenSizeToConfig = applyScreenSizeToConfig,
@@ -1115,7 +1148,7 @@ fun ContainerConfigDialog(
             dismissBtnText = dismissDialogState.dismissBtnText,
             onDismissRequest = { dismissDialogState = MessageDialogState(visible = false) },
             onDismissClick = { dismissDialogState = MessageDialogState(visible = false) },
-            onConfirmClick = dismissWithBackdropCleanup,
+            onConfirmClick = backdropImageController.dismissWithCleanup,
         )
 
         Dialog(
@@ -1146,7 +1179,7 @@ fun ContainerConfigDialog(
                             },
                             actions = {
                                 IconButton(
-                                    onClick = saveWithBackdropCleanup,
+                                    onClick = backdropImageController.saveWithCleanup,
                                     content = { Icon(Icons.Default.Save, null) },
                                 )
                             },
