@@ -1151,92 +1151,118 @@ fun ContainerConfigDialog(
             onConfirmClick = backdropImageController.dismissWithCleanup,
         )
 
-        Dialog(
-            onDismissRequest = onDismissCheck,
-            properties = DialogProperties(
-                usePlatformDefaultWidth = false,
-                dismissOnClickOutside = false,
-            ),
-            content = {
-                val scrollState = rememberScrollState()
+        ContainerConfigDialogScaffold(
+            title = title,
+            initialConfig = initialConfig,
+            config = config,
+            state = state,
+            default = default,
+            onDismissCheck = onDismissCheck,
+            onSaveClick = backdropImageController.saveWithCleanup,
+            nonzeroResolutionError = nonzeroResolutionError,
+            aspectResolutionError = aspectResolutionError,
+        )
+    }
+}
 
-                Scaffold(
-                    modifier = Modifier.fillMaxSize(),
-                    topBar = {
-                        CenterAlignedTopAppBar(
-                            title = {
-                                Text(
-                                    text = "$title${if (initialConfig != config) "*" else ""}",
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            },
-                            navigationIcon = {
-                                IconButton(
-                                    onClick = onDismissCheck,
-                                    content = { Icon(Icons.Default.Close, null) },
-                                )
-                            },
-                            actions = {
-                                IconButton(
-                                    onClick = backdropImageController.saveWithCleanup,
-                                    content = { Icon(Icons.Default.Save, null) },
-                                )
-                            },
-                        )
-                    },
-                ) { paddingValues ->
-                    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
-                    val tabs = listOf(
-                        stringResource(R.string.container_config_tab_general),
-                        stringResource(R.string.container_config_tab_graphics),
-                        stringResource(R.string.container_config_tab_emulation),
-                        stringResource(R.string.container_config_tab_controller),
-                        stringResource(R.string.container_config_tab_wine),
-                        stringResource(R.string.container_config_tab_win_components),
-                        stringResource(R.string.container_config_tab_environment),
-                        stringResource(R.string.container_config_tab_drives),
-                        stringResource(R.string.container_config_tab_advanced)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ContainerConfigDialogScaffold(
+    title: String,
+    initialConfig: ContainerData,
+    config: ContainerData,
+    state: ContainerConfigState,
+    default: Boolean,
+    onDismissCheck: () -> Unit,
+    onSaveClick: () -> Unit,
+    nonzeroResolutionError: String,
+    aspectResolutionError: String,
+) {
+    Dialog(
+        onDismissRequest = onDismissCheck,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnClickOutside = false,
+        ),
+        content = {
+            val scrollState = rememberScrollState()
+
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                topBar = {
+                    CenterAlignedTopAppBar(
+                        title = {
+                            Text(
+                                text = "$title${if (initialConfig != config) "*" else ""}",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        navigationIcon = {
+                            IconButton(
+                                onClick = onDismissCheck,
+                                content = { Icon(Icons.Default.Close, null) },
+                            )
+                        },
+                        actions = {
+                            IconButton(
+                                onClick = onSaveClick,
+                                content = { Icon(Icons.Default.Save, null) },
+                            )
+                        },
                     )
+                },
+            ) { paddingValues ->
+                var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+                val tabs = listOf(
+                    stringResource(R.string.container_config_tab_general),
+                    stringResource(R.string.container_config_tab_graphics),
+                    stringResource(R.string.container_config_tab_emulation),
+                    stringResource(R.string.container_config_tab_controller),
+                    stringResource(R.string.container_config_tab_wine),
+                    stringResource(R.string.container_config_tab_win_components),
+                    stringResource(R.string.container_config_tab_environment),
+                    stringResource(R.string.container_config_tab_drives),
+                    stringResource(R.string.container_config_tab_advanced),
+                )
+                Column(
+                    modifier = Modifier
+                        .padding(
+                            top = app.gamenative.utils.PaddingUtils.statusBarAwarePadding().calculateTopPadding() + paddingValues.calculateTopPadding(),
+                            bottom = 32.dp + paddingValues.calculateBottomPadding(),
+                            start = paddingValues.calculateStartPadding(LayoutDirection.Ltr),
+                            end = paddingValues.calculateEndPadding(LayoutDirection.Ltr),
+                        )
+                        .fillMaxSize(),
+                ) {
+                    androidx.compose.material3.ScrollableTabRow(selectedTabIndex = selectedTab, edgePadding = 0.dp) {
+                        tabs.forEachIndexed { index, label ->
+                            androidx.compose.material3.Tab(
+                                selected = selectedTab == index,
+                                onClick = { selectedTab = index },
+                                text = { Text(text = label) },
+                            )
+                        }
+                    }
                     Column(
                         modifier = Modifier
-                            .padding(
-                                top = app.gamenative.utils.PaddingUtils.statusBarAwarePadding().calculateTopPadding() + paddingValues.calculateTopPadding(),
-                                bottom = 32.dp + paddingValues.calculateBottomPadding(),
-                                start = paddingValues.calculateStartPadding(LayoutDirection.Ltr),
-                                end = paddingValues.calculateEndPadding(LayoutDirection.Ltr),
-                            )
-                            .fillMaxSize(),
+                            .verticalScroll(scrollState)
+                            .weight(1f),
                     ) {
-                        androidx.compose.material3.ScrollableTabRow(selectedTabIndex = selectedTab, edgePadding = 0.dp) {
-                            tabs.forEachIndexed { index, label ->
-                                androidx.compose.material3.Tab(
-                                    selected = selectedTab == index,
-                                    onClick = { selectedTab = index },
-                                    text = { Text(text = label) },
-                                )
-                            }
-                        }
-                        Column(
-                            modifier = Modifier
-                                .verticalScroll(scrollState)
-                                .weight(1f),
-                        ) {
-                            if (selectedTab == 0) GeneralTabContent(state, nonzeroResolutionError, aspectResolutionError)
-                            if (selectedTab == 1) GraphicsTabContent(state)
-                            if (selectedTab == 2) EmulationTabContent(state)
-                            if (selectedTab == 3) ControllerTabContent(state, default)
-                            if (selectedTab == 4) WineTabContent(state)
-                            if (selectedTab == 5) WinComponentsTabContent(state)
-                            if (selectedTab == 6) EnvironmentTabContent(state)
-                            if (selectedTab == 7) DrivesTabContent(state)
-                            if (selectedTab == 8) AdvancedTabContent(state)
-                        }
+                        if (selectedTab == 0) GeneralTabContent(state, nonzeroResolutionError, aspectResolutionError)
+                        if (selectedTab == 1) GraphicsTabContent(state)
+                        if (selectedTab == 2) EmulationTabContent(state)
+                        if (selectedTab == 3) ControllerTabContent(state, default)
+                        if (selectedTab == 4) WineTabContent(state)
+                        if (selectedTab == 5) WinComponentsTabContent(state)
+                        if (selectedTab == 6) EnvironmentTabContent(state)
+                        if (selectedTab == 7) DrivesTabContent(state)
+                        if (selectedTab == 8) AdvancedTabContent(state)
                     }
                 }
             }
-        )
-    }
+        },
+    )
 }
 
 @Preview(uiMode = Configuration.UI_MODE_NIGHT_YES or Configuration.UI_MODE_TYPE_NORMAL)
