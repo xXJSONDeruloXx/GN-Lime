@@ -2168,6 +2168,9 @@ class SteamService : Service(), IChallengeUrlChanged {
                 return@async PostSyncInfo(SyncResult.InProgress)
             }
 
+            // Migrate GSE Saves to Steam userdata
+            SteamUtils.migrateGSESavesToSteamUserdata(instance?.applicationContext!!, appId)
+
             try {
                 var syncResult = PostSyncInfo(SyncResult.UnknownFail)
 
@@ -2255,6 +2258,9 @@ class SteamService : Service(), IChallengeUrlChanged {
                 Timber.w("Cannot force sync when sync already in progress for appId=$appId")
                 return@async PostSyncInfo(SyncResult.InProgress)
             }
+
+            // Migrate GSE Saves to Steam userdata
+            SteamUtils.migrateGSESavesToSteamUserdata(instance?.applicationContext!!, appId)
 
             try {
                 var syncResult = PostSyncInfo(SyncResult.UnknownFail)
