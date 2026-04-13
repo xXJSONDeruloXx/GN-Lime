@@ -244,6 +244,7 @@
     <string name="toggle_fullscreen">Перемкнути повноекранний режим</string>
     <string name="toggle_orientation">Перемкнути орієнтацію екрана</string>
     <string name="task_manager">Диспетчер завдань</string>
+    <string name="tools_wine_processes_running_hint">%1$d запущено, торкніться/клацніть процес, щоб закрити його</string>
     <string name="magnifier">Лупа</string>
     <string name="logs">Журнали</string>
     <string name="exit_game">Вийти з гри</string>

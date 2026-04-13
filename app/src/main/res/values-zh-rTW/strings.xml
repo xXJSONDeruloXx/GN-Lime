@@ -247,6 +247,7 @@
     <string name="toggle_fullscreen">切換全屏</string>
     <string name="toggle_orientation">切換螢幕方向</string>
     <string name="task_manager">工作管理員</string>
+    <string name="tools_wine_processes_running_hint">%1$d 個正在執行，點按/點擊某個程序以關閉</string>
     <string name="magnifier">放大鏡</string>
     <string name="logs">應用程序日誌</string>
     <string name="exit_game">退出</string>

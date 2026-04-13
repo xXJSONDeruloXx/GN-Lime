@@ -262,6 +262,7 @@
     <string name="toggle_fullscreen">전체 화면 전환</string>
     <string name="toggle_orientation">방향 전환</string>
     <string name="task_manager">작업 관리자</string>
+    <string name="tools_wine_processes_running_hint">%1$d개 실행 중, 프로세스를 탭/클릭해 종료</string>
     <string name="magnifier">돋보기</string>
     <string name="logs">로그</string>
     <string name="exit_game">종료</string>

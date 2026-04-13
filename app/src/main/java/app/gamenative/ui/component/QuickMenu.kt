@@ -11,8 +11,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
@@ -224,6 +226,7 @@ fun QuickMenu(
     winHandler: WinHandler? = null,
     wineProcesses: List<ProcessInfo> = emptyList(),
     isWineProcessesLoading: Boolean = false,
+    onToolsVisibilityChanged: (Boolean) -> Unit = {},
     isPerformanceHudEnabled: Boolean = false,
     performanceHudConfig: PerformanceHudConfig = PerformanceHudConfig(),
     onPerformanceHudConfigChanged: (PerformanceHudConfig) -> Unit = {},
@@ -517,7 +520,6 @@ fun QuickMenu(
                                             winHandler = winHandler,
                                             processes = wineProcesses,
                                             isLoadingProcesses = isWineProcessesLoading,
-                                            onDismiss = onDismiss,
                                             firstItemFocusRequester = toolsItemFocusRequester,
                                             modifier = Modifier.fillMaxSize(),
                                         )
@@ -554,6 +556,10 @@ fun QuickMenu(
         }
     }
 
+    LaunchedEffect(isVisible, selectedTab) {
+        onToolsVisibilityChanged(isVisible && selectedTab == QuickMenuTab.TOOLS)
+    }
+
     LaunchedEffect(isVisible) {
         if (isVisible) {
             repeat(3) {
@@ -573,19 +579,11 @@ private fun ToolsQuickMenuTab(
     winHandler: WinHandler?,
     processes: List<ProcessInfo>,
     isLoadingProcesses: Boolean,
-    onDismiss: () -> Unit,
     firstItemFocusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
     val accentColor = PluviaTheme.colors.accentPurple
-    val item = QuickMenuItem(
-        id = -1,
-        icon = Icons.Default.BarChart,
-        labelResId = R.string.launch_task_manager,
-        accentColor = accentColor,
-        enabled = winHandler != null,
-    )
 
     Column(
         modifier = modifier
@@ -593,23 +591,11 @@ private fun ToolsQuickMenuTab(
             .focusGroup(),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        QuickMenuItemRow(
-            item = item,
-            onClick = {
-                winHandler?.exec("taskmgr.exe")
-                onDismiss()
-            },
-            focusRequester = firstItemFocusRequester,
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
         QuickMenuSectionHeader(
-            title = stringResource(R.string.tools_wine_processes),
-            subtitle = if (isLoadingProcesses) {
+            title = if (isLoadingProcesses) {
                 stringResource(R.string.main_loading)
             } else {
-                stringResource(R.string.tools_wine_processes_running, processes.size)
+                stringResource(R.string.tools_wine_processes_running_hint, processes.size)
             },
         )
 
@@ -621,11 +607,15 @@ private fun ToolsQuickMenuTab(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
         } else {
-            processes.forEach { process ->
-                QuickMenuReadOnlyValueRow(
-                    title = process.name,
-                    value = process.formattedMemoryUsage,
+            processes.forEachIndexed { index, process ->
+                QuickMenuProcessRow(
+                    title = process.name + if (process.wow64Process) " *32" else "",
+                    subtitle = process.formattedMemoryUsage,
                     accentColor = accentColor,
+                    onEndProcess = {
+                        winHandler?.killProcess(process.name, process.pid)
+                    },
+                    focusRequester = if (index == 0) firstItemFocusRequester else null,
                 )
             }
         }
@@ -1580,11 +1570,13 @@ private fun QuickMenuSwitch(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun QuickMenuReadOnlyValueRow(
+private fun QuickMenuProcessRow(
     title: String,
-    value: String,
+    subtitle: String,
     accentColor: Color,
+    onEndProcess: () -> Unit,
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
 ) {
@@ -1618,7 +1610,7 @@ private fun QuickMenuReadOnlyValueRow(
                 if (isFocused) {
                     Modifier.border(
                         width = 2.dp,
-                        color = accentColor.copy(alpha = 0.7f),
+                        color = accentColor.copy(alpha = 0.8f),
                         shape = shape,
                     )
                 } else {
@@ -1633,26 +1625,52 @@ private fun QuickMenuReadOnlyValueRow(
                 }
             )
             .focusable(interactionSource = interactionSource)
+            .onPreviewKeyEvent { keyEvent ->
+                if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN && isFocused) {
+                    when (keyEvent.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_BUTTON_A,
+                        KeyEvent.KEYCODE_DPAD_CENTER,
+                        KeyEvent.KEYCODE_ENTER -> {
+                            onEndProcess()
+                            true
+                        }
+
+                        else -> false
+                    }
+                } else {
+                    false
+                }
+            }
+            .selectable(
+                selected = isFocused,
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onEndProcess,
+            )
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.bodyLarge,
-            color = if (isFocused) accentColor else MaterialTheme.colorScheme.onSurface,
-            fontWeight = if (isFocused) FontWeight.SemiBold else FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-
-        Text(
-            text = value,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (isFocused) accentColor else MaterialTheme.colorScheme.onSurfaceVariant,
-            fontWeight = if (isFocused) FontWeight.SemiBold else FontWeight.Medium,
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (isFocused) accentColor else MaterialTheme.colorScheme.onSurface,
+                fontWeight = if (isFocused) FontWeight.SemiBold else FontWeight.Medium,
+                maxLines = 1,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .basicMarquee(iterations = Int.MAX_VALUE),
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isFocused) accentColor.copy(alpha = 0.92f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 

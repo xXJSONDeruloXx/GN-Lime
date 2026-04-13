@@ -249,6 +249,7 @@
     <string name="toggle_fullscreen">Basculer en plein écran</string>
     <string name="toggle_orientation">Basculer l\'orientation</string>
     <string name="task_manager">Gestionnaire de tâches</string>
+    <string name="tools_wine_processes_running_hint">%1$d en cours, touchez/cliquez sur un processus pour le fermer</string>
     <string name="magnifier">Loupe</string>
     <string name="logs">Journaux</string>
     <string name="exit_game">Quitter</string>

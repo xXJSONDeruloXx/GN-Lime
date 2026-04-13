@@ -251,6 +251,7 @@
     <string name="toggle_fullscreen">Comută pe ecran complet</string>
     <string name="toggle_orientation">Comută orientarea</string>
     <string name="task_manager">Manager de activități</string>
+    <string name="tools_wine_processes_running_hint">%1$d în execuție, atinge/clic pe un proces pentru a-l închide</string>
     <string name="magnifier">Lupă</string>
     <string name="logs">Loguri</string>
     <string name="exit_game">Ieșire</string>

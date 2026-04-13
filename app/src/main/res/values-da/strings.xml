@@ -177,6 +177,7 @@
     <string name="toggle_fullscreen">Skift fuldskærm</string>
     <string name="toggle_orientation">Skift orientering</string>
     <string name="task_manager">Jobliste</string>
+    <string name="tools_wine_processes_running_hint">%1$d kører, tryk/klik på en proces for at lukke den</string>
     <string name="magnifier">Forstørrelsesglas</string>
     <string name="logs">Logfiler</string>
     <string name="exit_game">Afslut</string>
