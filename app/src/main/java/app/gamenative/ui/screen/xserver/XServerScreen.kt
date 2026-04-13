@@ -199,6 +199,33 @@ private const val EXIT_PROCESS_TIMEOUT_MS = 30_000L
 private const val EXIT_PROCESS_POLL_INTERVAL_MS = 1_000L
 private const val EXIT_PROCESS_RESPONSE_TIMEOUT_MS = 2_000L
 private const val DEFAULT_FPS_LIMITER_MAX_HZ = 60
+private const val DEFAULT_FPS_LIMITER_TARGET_HZ = 60
+private const val FPS_LIMITER_ENABLED_EXTRA = "fpsLimiterEnabled"
+private const val FPS_LIMITER_TARGET_EXTRA = "fpsLimiterTarget"
+
+private fun parsePositiveFpsLimit(value: String): Int? = value.toIntOrNull()?.takeIf { it > 0 }
+
+private fun hasLegacyDxvkFrameRate(container: Container): Boolean = EnvVars(container.envVars).has("DXVK_FRAME_RATE")
+
+private fun legacyDxvkFrameRate(container: Container): Int? =
+    parsePositiveFpsLimit(EnvVars(container.envVars).get("DXVK_FRAME_RATE"))
+
+private fun parseBooleanExtra(value: String): Boolean? =
+    when (value.trim().lowercase(Locale.US)) {
+        "true" -> true
+        "false" -> false
+        else -> null
+    }
+
+private fun initialFpsLimiterEnabled(container: Container): Boolean {
+    parseBooleanExtra(container.getExtra(FPS_LIMITER_ENABLED_EXTRA))?.let { return it }
+    return !hasLegacyDxvkFrameRate(container)
+}
+
+private fun initialFpsLimiterTarget(container: Container): Int =
+    parsePositiveFpsLimit(container.getExtra(FPS_LIMITER_TARGET_EXTRA))
+        ?: legacyDxvkFrameRate(container)
+        ?: DEFAULT_FPS_LIMITER_TARGET_HZ
 
 private fun detectMaxRefreshRateHz(context: Context, attachedView: View?): Int {
     val display = attachedView?.display
@@ -407,8 +434,14 @@ fun XServerScreen(
     var isPerformanceHudEnabled by remember { mutableStateOf(PrefManager.showFps) }
     val shouldTrackDisplayedFrames = remember { AtomicBoolean(false) }
     var detectedMaxRefreshRateHz by remember { mutableIntStateOf(detectMaxRefreshRateHz(context, null)) }
-    var fpsLimiterEnabled by rememberSaveable { mutableStateOf(false) }
-    var fpsLimiterTarget by rememberSaveable { mutableIntStateOf(30) }
+    var fpsLimiterEnabled by rememberSaveable(container.id) { mutableStateOf(initialFpsLimiterEnabled(container)) }
+    var fpsLimiterTarget by rememberSaveable(container.id) { mutableIntStateOf(initialFpsLimiterTarget(container)) }
+
+    fun persistFpsLimiterState() {
+        container.putExtra(FPS_LIMITER_ENABLED_EXTRA, fpsLimiterEnabled)
+        container.putExtra(FPS_LIMITER_TARGET_EXTRA, fpsLimiterTarget)
+        container.saveData()
+    }
 
     fun loadPerformanceHudConfig(): PerformanceHudConfig {
         return PerformanceHudConfig(
@@ -481,6 +514,7 @@ fun XServerScreen(
     fun applyFpsLimiterEnabled(enabled: Boolean) {
         fpsLimiterEnabled = enabled
         applyFpsLimiterToEngines(if (enabled) fpsLimiterTarget else 0)
+        persistFpsLimiterState()
     }
 
     fun applyFpsLimiterTarget(target: Int) {
@@ -489,6 +523,7 @@ fun XServerScreen(
         if (fpsLimiterEnabled) {
             applyFpsLimiterToEngines(sanitized)
         }
+        persistFpsLimiterState()
     }
 
     LaunchedEffect(xServerView) {
