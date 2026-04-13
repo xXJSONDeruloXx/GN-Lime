@@ -2535,6 +2535,7 @@ private fun shiftXEnvironmentToContext(
 }
 
 private fun hardKillStaleWineProcessesBeforeLaunch() {
+    val deadlineMs = System.currentTimeMillis() + 5_000
     val staleWinePids = ProcessHelper.listRunningWineProcesses()
         .mapNotNull { it.toIntOrNull() }
         .distinct()
@@ -2550,13 +2551,21 @@ private fun hardKillStaleWineProcessesBeforeLaunch() {
     )
     ProcessHelper.killAllWineProcesses()
 
-    val remainingWinePids = ProcessHelper.listRunningWineProcesses()
-        .mapNotNull { it.toIntOrNull() }
-        .distinct()
+    var remainingWinePids: List<Int>
+    do {
+        Thread.sleep(100)
+        remainingWinePids = ProcessHelper.listRunningWineProcesses()
+            .mapNotNull { it.toIntOrNull() }
+            .distinct()
+    } while (remainingWinePids.isNotEmpty() && System.currentTimeMillis() < deadlineMs)
+
     if (remainingWinePids.isNotEmpty()) {
         Timber.w(
             "Wine processes still present after hard-kill attempt: %s",
             remainingWinePids.joinToString(),
+        )
+        throw IllegalStateException(
+            "Wine processes still present after hard-kill attempt: ${remainingWinePids.joinToString()}"
         )
     }
 }
