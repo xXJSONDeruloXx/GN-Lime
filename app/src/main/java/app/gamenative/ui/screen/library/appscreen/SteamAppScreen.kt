@@ -24,7 +24,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
-import androidx.compose.material3.OutlinedTextField
+import app.gamenative.ui.component.NoExtractOutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
@@ -813,6 +813,8 @@ class SteamAppScreen : BaseAppScreen() {
                         properties = mapOf("game_name" to appInfo.name),
                     )
                     CoroutineScope(Dispatchers.IO).launch {
+                        SnackbarManager.show(context.getString(R.string.library_cloud_sync_starting))
+
                         val steamId = SteamService.userSteamId
                         if (steamId == null) {
                             SnackbarManager.show(context.getString(R.string.steam_not_logged_in))
@@ -833,17 +835,17 @@ class SteamAppScreen : BaseAppScreen() {
 
                         when (syncResult.syncResult) {
                             SyncResult.Success -> {
-                                SnackbarManager.show(context.getString(R.string.steam_cloud_sync_success))
+                                SnackbarManager.show(context.getString(R.string.library_cloud_sync_success))
                             }
 
                             SyncResult.UpToDate -> {
-                                SnackbarManager.show(context.getString(R.string.steam_cloud_sync_up_to_date))
+                                SnackbarManager.show(context.getString(R.string.library_cloud_sync_up_to_date))
                             }
 
                             else -> {
                                 SnackbarManager.show(
                                     context.getString(
-                                        R.string.steam_cloud_sync_failed,
+                                        R.string.library_cloud_sync_error,
                                         syncResult.syncResult,
                                     ),
                                 )
@@ -1091,6 +1093,7 @@ class SteamAppScreen : BaseAppScreen() {
                         SteamService.workshopPausedApps.remove(gameId)
                         CoroutineScope(Dispatchers.IO).launch {
                             SteamService.deleteApp(gameId)
+                            DownloadService.invalidateCache()
                             PluviaApp.events.emit(AndroidEvent.LibraryInstallStatusChanged(gameId))
                             withContext(Dispatchers.Main) {
                                 hideInstallDialog(gameId)
@@ -1214,6 +1217,7 @@ class SteamAppScreen : BaseAppScreen() {
 
                             CoroutineScope(Dispatchers.IO).launch {
                                 val success = SteamService.deleteApp(gameId)
+                                DownloadService.invalidateCache()
                                 withContext(Dispatchers.Main) {
                                     ContainerUtils.deleteContainer(context, libraryItem.appId)
                                 }
@@ -1447,7 +1451,7 @@ private fun SteamChangeBranchDialog(
                     expanded = branchExpanded,
                     onExpandedChange = { branchExpanded = it },
                 ) {
-                    OutlinedTextField(
+                    NoExtractOutlinedTextField(
                         value = selectedBranch,
                         onValueChange = {},
                         readOnly = true,
@@ -1475,7 +1479,7 @@ private fun SteamChangeBranchDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                OutlinedTextField(
+                NoExtractOutlinedTextField(
                     value = privateBranchPassword,
                     onValueChange = {
                         privateBranchPassword = it
