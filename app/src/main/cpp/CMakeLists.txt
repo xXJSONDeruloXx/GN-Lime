@@ -31,20 +31,22 @@ target_link_libraries(winlator
                       GLESv2
                       GLESv3)
 
-# --- extras (GPU helper + Vulkan + adrenotools) ---
-add_subdirectory(extras/adrenotools)
+# --- extras (GPU helper + Vulkan + adrenotools) --- arm64 only
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+    add_subdirectory(extras/adrenotools)
 
-add_library(extras SHARED
-            extras/gpu_image.c
-            extras/vulkan.c)
+    add_library(extras SHARED
+                extras/gpu_image.c
+                extras/vulkan.c)
 
-target_link_libraries(extras
-                      log
-                      android
-                      EGL
-                      GLESv2
-                      GLESv3
-                      adrenotools)
+    target_link_libraries(extras
+                          log
+                          android
+                          EGL
+                          GLESv2
+                          GLESv3
+                          adrenotools)
+endif()
 
 # --- xconnectorpatch (X11 connector epoll native) ---
 add_library(xconnectorpatch SHARED
