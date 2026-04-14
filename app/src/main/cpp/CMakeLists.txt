@@ -15,9 +15,11 @@ add_subdirectory(patchelf)
 # artifacts.  The clean equivalent lives in extras/gpu_image.c (built as
 # part of libextras.so).  gpu_helper.c provides vkGetDeviceExtensions.
 add_library(winlator SHARED
+            winlator/arraytools.c
             winlator/drawable.c
             winlator/gpu_helper.c
             winlator/sysvshared_memory.c
+            winlator/wine_registry_editor.c
             winlator/xconnector_epoll.c
             winlator/alsa_client.c
             winlator/patchelf_wrapper.cpp)
