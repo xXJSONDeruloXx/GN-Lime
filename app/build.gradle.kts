@@ -190,30 +190,14 @@ android {
         ignoreFormatFailures  = false
     }
 
-    // xconnectorpatch is shipped as a prebuilt jniLib because our APK packaging flow
-    // does not rebuild native libraries during release creation.
-    // externalNativeBuild {
-    //     cmake {
-    //         path = file("src/main/cpp/xconnectorpatch/CMakeLists.txt")
-    //         version = "3.22.1"
-    //     }
-    // }
-
-    // build extras needed in libwinlator_bionic.so
-    // externalNativeBuild {
-    //     cmake {
-    //         path = file("src/main/cpp/extras/CMakeLists.txt")   // the file shown above
-    //         version = "3.22.1"
-    //     }
-    // }
-
-    // cmake on release builds a proot that fails to process ld-2.31.so
-    // externalNativeBuild {
-    //     cmake {
-    //         path = file("src/main/cpp/CMakeLists.txt")
-    //         version = "3.22.1"
-    //     }
-    // }
+    // Unified native build: winlator, virglrenderer, patchelf, extras, xconnectorpatch
+    // (proot is excluded — commented out in CMakeLists.txt)
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
 
     // (For now) Uncomment for LeakCanary to work.
     // configurations {

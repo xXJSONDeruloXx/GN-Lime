@@ -4,10 +4,13 @@ Project(Pluvia)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2 -Wno-unused-function -Wimplicit-function-declaration")
 
-#add_subdirectory(proot)
+# --- virglrenderer (Mesa virgl GPU renderer) ---
 add_subdirectory(virglrenderer)
+
+# --- patchelf (ELF binary patcher) ---
 add_subdirectory(patchelf)
 
+# --- winlator (core JNI: X11 connector, GPU, audio, etc.) ---
 add_library(winlator SHARED
             winlator/drawable.c
             winlator/gpu_image.c
@@ -24,3 +27,24 @@ target_link_libraries(winlator
                       EGL
                       GLESv2
                       GLESv3)
+
+# --- extras (GPU helper + Vulkan + adrenotools) ---
+add_subdirectory(extras/adrenotools)
+
+add_library(extras SHARED
+            extras/gpu_image.c
+            extras/vulkan.c)
+
+target_link_libraries(extras
+                      log
+                      android
+                      EGL
+                      GLESv2
+                      GLESv3
+                      adrenotools)
+
+# --- xconnectorpatch (X11 connector epoll native) ---
+add_library(xconnectorpatch SHARED
+            xconnectorpatch/xconnectorpatch.c)
+
+target_link_libraries(xconnectorpatch log)
