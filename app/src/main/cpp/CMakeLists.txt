@@ -7,8 +7,8 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2 -Wno-unused-function -Wimplicit-function
 # --- virglrenderer (Mesa virgl GPU renderer) ---
 add_subdirectory(virglrenderer)
 
-# --- patchelf (ELF binary patcher) ---
-add_subdirectory(patchelf)
+# --- patchelf: kept as prebuilt (requires C++20 / newer NDK) ---
+# add_subdirectory(patchelf)
 
 # --- winlator (core JNI: X11 connector, GPU, audio, etc.) ---
 # Note: winlator/gpu_image.c is excluded — it contains Ghidra decompiler
