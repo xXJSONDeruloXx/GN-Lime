@@ -11,9 +11,12 @@ add_subdirectory(virglrenderer)
 add_subdirectory(patchelf)
 
 # --- winlator (core JNI: X11 connector, GPU, audio, etc.) ---
+# Note: winlator/gpu_image.c is excluded — it contains Ghidra decompiler
+# artifacts.  The clean equivalent lives in extras/gpu_image.c (built as
+# part of libextras.so).  gpu_helper.c provides vkGetDeviceExtensions.
 add_library(winlator SHARED
             winlator/drawable.c
-            winlator/gpu_image.c
+            winlator/gpu_helper.c
             winlator/sysvshared_memory.c
             winlator/xconnector_epoll.c
             winlator/alsa_client.c
