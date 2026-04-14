@@ -61,3 +61,5 @@ app/keystores/*
 *.pyc
 __pycache__/
 resign.keystore
+# Downloaded at CI build time from xXJSONDeruloXx/libredirect releases
+app/src/main/assets/redirect.tzst

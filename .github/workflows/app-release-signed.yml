@@ -59,6 +59,15 @@ jobs:
           echo "--- local.properties ---"
           cat local.properties
 
+      - name: Download libredirect from source-built release
+        run: |
+          # Source-built from https://github.com/xXJSONDeruloXx/libredirect
+          # Tagged release for app.gnlime — no binary patching needed
+          RELEASE_TAG="app.gnlime-b3027c2"
+          curl -sL "https://github.com/xXJSONDeruloXx/libredirect/releases/download/${RELEASE_TAG}/redirect.tzst" \
+            -o app/src/main/assets/redirect.tzst
+          ls -la app/src/main/assets/redirect.tzst
+
       - name: Build signed release APK
         run: ./gradlew :app:assembleRelease-signed
 

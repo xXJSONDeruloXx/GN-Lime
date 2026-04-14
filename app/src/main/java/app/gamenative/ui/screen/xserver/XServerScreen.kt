@@ -183,7 +183,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.io.path.name
 import kotlin.text.lowercase
 import com.winlator.PrefManager as WinlatorPrefManager
-import com.winlator.xenvironment.ImageFsInstaller
 
 // Always re-extract drivers and DXVK on every launch to handle cases of container corruption
 // where games randomly stop working. Set to false once corruption issues are resolved.
@@ -3876,9 +3875,6 @@ private fun applyGeneralPatches(
     WinlatorPrefManager.init(context)
     WinlatorPrefManager.putString("current_box64_version", "")
 
-    // Re-extract redirect.tzst AFTER imagefs_patches to ensure our patched libredirect.so
-    // (with app.gnlime paths) wins over the app.gamenative version inside the patches archive.
-    ImageFsInstaller.installGuestLibs(context)
 }
 
 private fun refreshComponentsFiles(context: Context) {
