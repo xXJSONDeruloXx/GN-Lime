@@ -38,21 +38,23 @@ jobs:
         run: |
           mkdir -p app/keystores
           echo "$KEYSTORE" | base64 --decode > app/keystores/gnlime-release.jks
-          cat <<EOF > app/keystores/keystore.properties
+          cat > app/keystores/keystore.properties <<'PROPS'
           storeFile=keystores/gnlime-release.jks
-          keyAlias=$KEYSTORE_KEY_ALIAS
-          storePassword=$KEYSTORE_STORE_PASSWORD
-          keyPassword=$KEYSTORE_KEY_PASSWORD
-          EOF
+          PROPS
+          sed -i 's/^[[:space:]]*//' app/keystores/keystore.properties
+          echo "keyAlias=$KEYSTORE_KEY_ALIAS" >> app/keystores/keystore.properties
+          echo "storePassword=$KEYSTORE_STORE_PASSWORD" >> app/keystores/keystore.properties
+          echo "keyPassword=$KEYSTORE_KEY_PASSWORD" >> app/keystores/keystore.properties
 
       - name: Inject optional local properties
         run: |
-          cat <<EOF > local.properties
-          POSTHOG_API_KEY=${{ secrets.POSTHOG_API_KEY }}
-          POSTHOG_HOST=${{ secrets.POSTHOG_HOST }}
-          STEAMGRIDDB_API_KEY=${{ secrets.STEAMGRIDDB_API_KEY }}
-          CLOUD_PROJECT_NUMBER=${{ secrets.CLOUD_PROJECT_NUMBER }}
-          EOF
+          : > local.properties
+          [ -n "${{ secrets.POSTHOG_API_KEY }}" ]       && echo 'POSTHOG_API_KEY=${{ secrets.POSTHOG_API_KEY }}'             >> local.properties || true
+          [ -n "${{ secrets.POSTHOG_HOST }}" ]           && echo 'POSTHOG_HOST=${{ secrets.POSTHOG_HOST }}'                   >> local.properties || true
+          [ -n "${{ secrets.STEAMGRIDDB_API_KEY }}" ]    && echo 'STEAMGRIDDB_API_KEY=${{ secrets.STEAMGRIDDB_API_KEY }}'     >> local.properties || true
+          [ -n "${{ secrets.CLOUD_PROJECT_NUMBER }}" ]   && echo 'CLOUD_PROJECT_NUMBER=${{ secrets.CLOUD_PROJECT_NUMBER }}'   >> local.properties || true
+          echo "--- local.properties ---"
+          cat local.properties
 
       - name: Build signed release APK
         run: ./gradlew :app:assembleRelease-signed
