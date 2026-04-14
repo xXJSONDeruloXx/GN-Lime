@@ -7,8 +7,8 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2 -Wno-unused-function -Wimplicit-function
 # --- virglrenderer (Mesa virgl GPU renderer) ---
 add_subdirectory(virglrenderer)
 
-# --- patchelf: kept as prebuilt (requires C++20 / newer NDK) ---
-# add_subdirectory(patchelf)
+# --- patchelf (ELF binary patcher, C++17) ---
+add_subdirectory(patchelf)
 
 # --- winlator (core JNI: X11 connector, GPU, audio, etc.) ---
 # Note: winlator/gpu_image.c is excluded — it contains Ghidra decompiler
@@ -46,6 +46,17 @@ if(ANDROID_ABI STREQUAL "arm64-v8a")
                           GLESv2
                           GLESv3
                           adrenotools)
+
+    # --- evshim (gamepad LD_PRELOAD shim) ---
+    # Uses minimal SDL2 type stubs in extras/SDL2/ (loads real SDL via dlopen)
+    add_library(evshim SHARED
+                extras/evshim.c)
+
+    target_include_directories(evshim PRIVATE extras)
+
+    target_link_libraries(evshim
+                          log
+                          dl)
 endif()
 
 # --- xconnectorpatch (X11 connector epoll native) ---
