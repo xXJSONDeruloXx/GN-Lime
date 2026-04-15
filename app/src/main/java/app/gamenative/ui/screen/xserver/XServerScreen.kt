@@ -73,6 +73,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import app.gamenative.BuildConfig
 import app.gamenative.PluviaApp
 import app.gamenative.PrefManager
 import app.gamenative.data.GameSource
@@ -89,6 +90,7 @@ import app.gamenative.externaldisplay.ExternalDisplayInputController
 import app.gamenative.externaldisplay.ExternalDisplaySwapController
 import app.gamenative.externaldisplay.SwapInputOverlayView
 import app.gamenative.service.AchievementWatcher
+import app.gamenative.ui.util.AchievementNotificationManager
 import app.gamenative.service.SteamService
 import app.gamenative.service.amazon.AmazonService
 import app.gamenative.service.epic.EpicService
@@ -3127,6 +3129,17 @@ private fun setupXEnvironment(
                 iconUrlMap = iconUrlMap,
                 configDirectory = configDirectory,
             ).also { it.start() }
+
+            // DEBUG: fire a fake achievement notification 30 s after game launch to test sound/UI
+            if (BuildConfig.DEBUG) {
+                CoroutineScope(Dispatchers.IO).launch {
+                    delay(30_000)
+                    AchievementNotificationManager.show(
+                        name = "Test Achievement Unlocked",
+                        iconUrl = null,
+                    )
+                }
+            }
         }
     }
 
