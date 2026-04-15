@@ -259,6 +259,7 @@
     <string name="toggle_fullscreen">Alternar pantalla completa</string>
     <string name="toggle_orientation">Alternar orientación</string>
     <string name="task_manager">Administrador de tareas</string>
+    <string name="tools_wine_processes_running_hint">%1$d en ejecución, toca/haz clic en un proceso para cerrarlo</string>
     <string name="magnifier">Lupa</string>
     <string name="logs">Registros</string>
     <string name="exit_game">Salir</string>

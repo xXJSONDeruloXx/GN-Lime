@@ -248,6 +248,7 @@
     <string name="toggle_fullscreen">Attiva/Disattiva Schermo Intero</string>
     <string name="toggle_orientation">Cambia Orientamento</string>
     <string name="task_manager">Gestione Attività</string>
+    <string name="tools_wine_processes_running_hint">%1$d in esecuzione, tocca/fai clic su un processo per chiuderlo</string>
     <string name="magnifier">Lente d\'ingrandimento</string>
     <string name="logs">Log</string>
     <string name="exit_game">Esci</string>

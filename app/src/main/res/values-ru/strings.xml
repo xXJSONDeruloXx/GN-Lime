@@ -1173,6 +1173,7 @@ https://gamenative.app
     <string name="tab_local">Пользовательское</string>
     <string name="tab_steam">Steam</string>
     <string name="task_manager">Менеджер задач</string>
+    <string name="tools_wine_processes_running_hint">%1$d запущено, нажмите/кликните по процессу, чтобы закрыть его</string>
     <string name="template_percent">%1$d процент.</string>
     <string name="thumbstick_buttons">Кнопки джойстика</string>
     <string name="thumbstick_buttons_category">Кнопки джойстика</string>

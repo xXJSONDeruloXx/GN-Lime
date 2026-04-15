@@ -217,6 +217,7 @@ private const val DEFAULT_FPS_LIMITER_MAX_HZ = 60
 private const val DEFAULT_FPS_LIMITER_TARGET_HZ = 60
 private const val FPS_LIMITER_ENABLED_EXTRA = "fpsLimiterEnabled"
 private const val FPS_LIMITER_TARGET_EXTRA = "fpsLimiterTarget"
+private const val QUICK_MENU_PROCESS_POLL_INTERVAL_MS = 2_000L
 
 private fun parsePositiveFpsLimit(value: String): Int? = value.toIntOrNull()?.takeIf { it > 0 }
 
@@ -409,6 +410,48 @@ private suspend fun loadBackdropBitmap(
     }
 }
 
+private suspend fun requestWineProcessSnapshot(winHandler: WinHandler): List<ProcessInfo>? {
+    val previousListener = winHandler.getOnGetProcessInfoListener()
+    val lock = Any()
+    var currentList = mutableListOf<ProcessInfo>()
+    var expectedCount = 0
+    val deferred = CompletableDeferred<List<ProcessInfo>?>()
+
+    val listener = OnGetProcessInfoListener { index, count, processInfo ->
+        previousListener?.onGetProcessInfo(index, count, processInfo)
+        synchronized(lock) {
+            if (count == 0 && processInfo == null) {
+                if (!deferred.isCompleted) deferred.complete(emptyList())
+                return@synchronized
+            }
+            if (index == 0) {
+                currentList = mutableListOf()
+                expectedCount = count
+                if (count == 0 && !deferred.isCompleted) {
+                    deferred.complete(emptyList())
+                    return@synchronized
+                }
+            }
+            if (processInfo != null) {
+                currentList.add(processInfo)
+            }
+            if (currentList.size >= expectedCount && !deferred.isCompleted) {
+                deferred.complete(currentList.toList())
+            }
+        }
+    }
+
+    return try {
+        winHandler.setOnGetProcessInfoListener(listener)
+        winHandler.listProcesses()
+        withTimeoutOrNull(EXIT_PROCESS_RESPONSE_TIMEOUT_MS) {
+            deferred.await()
+        }
+    } finally {
+        winHandler.setOnGetProcessInfoListener(previousListener)
+    }
+}
+
 // TODO logs in composables are 'unstable' which can cause recomposition (performance issues)
 
 @Composable
@@ -558,6 +601,9 @@ fun XServerScreen(
     var showPhysicalControllerDialog by remember { mutableStateOf(false) }
     var keyboardRequestedFromOverlay by remember { mutableStateOf(false) }
     var showQuickMenu by remember { mutableStateOf(false) }
+    var quickMenuToolsVisible by remember { mutableStateOf(false) }
+    var quickMenuWineProcesses by remember { mutableStateOf<List<ProcessInfo>>(emptyList()) }
+    var quickMenuWineProcessesLoading by remember { mutableStateOf(false) }
     var hasPhysicalController by remember { mutableStateOf(false) }
     var keepPausedForEditor by remember { mutableStateOf(false) }
     var hasPhysicalKeyboard by remember { mutableStateOf(false) }
@@ -1019,6 +1065,37 @@ fun XServerScreen(
             }
         }
         showQuickMenu = false
+    }
+
+    LaunchedEffect(showQuickMenu, quickMenuToolsVisible, xServerView) {
+        if (!showQuickMenu || !quickMenuToolsVisible) {
+            quickMenuWineProcesses = emptyList()
+            quickMenuWineProcessesLoading = false
+            return@LaunchedEffect
+        }
+
+        val winHandler = xServerView?.getxServer()?.winHandler
+        if (winHandler == null) {
+            quickMenuWineProcesses = emptyList()
+            quickMenuWineProcessesLoading = false
+            return@LaunchedEffect
+        }
+
+        quickMenuWineProcessesLoading = true
+        while (showQuickMenu && quickMenuToolsVisible) {
+            val snapshot = withContext(Dispatchers.IO) {
+                requestWineProcessSnapshot(winHandler)
+                    ?.sortedWith(
+                        compareByDescending<ProcessInfo> { normalizeProcessName(it.name) !in buildEssentialProcessAllowlist() }
+                            .thenByDescending { it.memoryUsage },
+                    )
+            }
+            if (snapshot != null) {
+                quickMenuWineProcesses = snapshot
+            }
+            quickMenuWineProcessesLoading = false
+            delay(QUICK_MENU_PROCESS_POLL_INTERVAL_MS)
+        }
     }
 
     val onQuickMenuItemSelected: (Int) -> Boolean = { itemId ->
@@ -2256,6 +2333,10 @@ fun XServerScreen(
             onItemSelected = onQuickMenuItemSelected,
             renderer = xServerView?.renderer,
             container = container,
+            winHandler = xServerView?.getxServer()?.winHandler,
+            wineProcesses = quickMenuWineProcesses,
+            isWineProcessesLoading = quickMenuWineProcessesLoading,
+            onToolsVisibilityChanged = { quickMenuToolsVisible = it },
             isPerformanceHudEnabled = isPerformanceHudEnabled,
             performanceHudConfig = performanceHudConfig,
             fpsLimiterEnabled = fpsLimiterEnabled,

@@ -237,6 +237,7 @@
     <string name="toggle_fullscreen">Vollbild umschalten</string>
     <string name="toggle_orientation">Ausrichtung wechseln</string>
     <string name="task_manager">Task-Manager</string>
+    <string name="tools_wine_processes_running_hint">%1$d aktiv, tippe/klicke auf einen Prozess, um ihn zu schließen</string>
     <string name="magnifier">Lupe</string>
     <string name="logs">Logs</string>
     <string name="exit_game">Beenden</string>

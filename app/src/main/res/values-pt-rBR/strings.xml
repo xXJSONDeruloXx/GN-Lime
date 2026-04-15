@@ -175,6 +175,7 @@
     <string name="toggle_fullscreen">Alternar Tela Cheia</string>
     <string name="toggle_orientation">Alternar Orientação</string>
     <string name="task_manager">Gerenciador de tarefas</string>
+    <string name="tools_wine_processes_running_hint">%1$d em execução, toque/clique em um processo para fechá-lo</string>
     <string name="magnifier">Lupa</string>
     <string name="logs">Logs</string>
     <string name="exit_game">Sair</string>
