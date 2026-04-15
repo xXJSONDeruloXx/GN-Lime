@@ -69,7 +69,7 @@ jobs:
           ls -la app/src/main/assets/redirect.tzst
 
       - name: Build signed release APK
-        run: ./gradlew :app:assembleRelease-signed
+        run: ./gradlew :app:assembleOssRelease-signed
 
       - name: Install Android SDK Build Tools
         run: |
@@ -85,14 +85,14 @@ jobs:
           if [ ! -d "$BUILD_TOOLS_DIR" ]; then
             BUILD_TOOLS_DIR="${ANDROID_SDK_ROOT}/build-tools/34.0.0"
           fi
-          APK=$(find app/build/outputs/apk/release-signed -name '*.apk' | head -n 1)
+          APK=$(find app/build/outputs/apk -name '*.apk' -path '*release-signed*' | head -n 1)
           "${BUILD_TOOLS_DIR}/apksigner" verify --verbose --print-certs "$APK"
 
       - name: Upload signed APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: gn-lime-release-signed
-          path: app/build/outputs/apk/release-signed/*.apk
+          path: app/build/outputs/apk/oss/release-signed/*.apk
 
       - name: Resolve version and tag
         id: version
@@ -105,7 +105,7 @@ jobs:
 
       - name: Rename APK for release
         run: |
-          APK=$(find app/build/outputs/apk/release-signed -name '*.apk' | head -n 1)
+          APK=$(find app/build/outputs/apk -name '*.apk' -path '*release-signed*' | head -n 1)
           cp "$APK" "GN-Lime-${{ steps.version.outputs.tag }}.apk"
 
       - name: Create GitHub Release
