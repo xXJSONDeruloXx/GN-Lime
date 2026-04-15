@@ -37,9 +37,19 @@ public abstract class ProcessHelper {
 //        Log.d("ProcessHelper", "Process terminated with pid: " + pid);
     }
 
+    public static void killProcess(int pid) {
+        Process.sendSignal(pid, SIGKILL);
+    }
+
     public static void terminateAllWineProcesses() {
         for (String process : listRunningWineProcesses()) {
             terminateProcess(Integer.parseInt(process));
+        }
+    }
+
+    public static void killAllWineProcesses() {
+        for (String process : listRunningWineProcesses()) {
+            killProcess(Integer.parseInt(process));
         }
     }
 
