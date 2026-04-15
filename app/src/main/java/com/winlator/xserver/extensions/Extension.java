@@ -17,4 +17,6 @@ public interface Extension {
     byte getFirstEventId();
 
     void handleRequest(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError;
+
+    default void close() {}
 }

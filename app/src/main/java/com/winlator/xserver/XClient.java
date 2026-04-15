@@ -4,6 +4,7 @@ import androidx.collection.ArrayMap;
 
 import com.winlator.xconnector.XInputStream;
 import com.winlator.xconnector.XOutputStream;
+import com.winlator.xconnector.XStreamLock;
 import com.winlator.xserver.events.Event;
 
 import java.io.IOException;
@@ -50,7 +51,7 @@ public class XClient implements XResourceManager.OnResourceLifecycleListener {
     }
 
     public void sendEvent(Event event) {
-        try {
+        try (XStreamLock ignored = outputStream.lock()) {
             event.send(sequenceNumber, outputStream);
         }
         catch (IOException e) {

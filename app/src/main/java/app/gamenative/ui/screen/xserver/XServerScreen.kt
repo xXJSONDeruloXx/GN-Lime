@@ -20,6 +20,7 @@ import android.view.WindowInsets
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.hardware.display.DisplayManager
 import android.hardware.input.InputManager
 import android.view.InputDevice
 import androidx.activity.ComponentActivity
@@ -42,6 +43,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -167,6 +169,7 @@ import com.winlator.xserver.ScreenInfo
 import com.winlator.xserver.Window
 import com.winlator.xserver.WindowManager
 import com.winlator.xserver.XServer
+import com.winlator.xserver.extensions.PresentExtension
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
@@ -190,6 +193,7 @@ import java.util.Arrays
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.io.path.name
+import kotlin.math.roundToInt
 import kotlin.text.lowercase
 import com.winlator.PrefManager as WinlatorPrefManager
 
@@ -203,6 +207,55 @@ private val isExiting = AtomicBoolean(false)
 private const val EXIT_PROCESS_TIMEOUT_MS = 30_000L
 private const val EXIT_PROCESS_POLL_INTERVAL_MS = 1_000L
 private const val EXIT_PROCESS_RESPONSE_TIMEOUT_MS = 2_000L
+private const val DEFAULT_FPS_LIMITER_MAX_HZ = 60
+private const val DEFAULT_FPS_LIMITER_TARGET_HZ = 60
+private const val FPS_LIMITER_ENABLED_EXTRA = "fpsLimiterEnabled"
+private const val FPS_LIMITER_TARGET_EXTRA = "fpsLimiterTarget"
+
+private fun parsePositiveFpsLimit(value: String): Int? = value.toIntOrNull()?.takeIf { it > 0 }
+
+private fun hasLegacyDxvkFrameRate(container: Container): Boolean = EnvVars(container.envVars).has("DXVK_FRAME_RATE")
+
+private fun legacyDxvkFrameRate(container: Container): Int? =
+    parsePositiveFpsLimit(EnvVars(container.envVars).get("DXVK_FRAME_RATE"))
+
+private fun parseBooleanExtra(value: String): Boolean? =
+    when (value.trim().lowercase(Locale.US)) {
+        "true" -> true
+        "false" -> false
+        else -> null
+    }
+
+private fun initialFpsLimiterEnabled(container: Container): Boolean {
+    parseBooleanExtra(container.getExtra(FPS_LIMITER_ENABLED_EXTRA))?.let { return it }
+    return !hasLegacyDxvkFrameRate(container)
+}
+
+private fun initialFpsLimiterTarget(container: Container): Int =
+    parsePositiveFpsLimit(container.getExtra(FPS_LIMITER_TARGET_EXTRA))
+        ?: legacyDxvkFrameRate(container)
+        ?: DEFAULT_FPS_LIMITER_TARGET_HZ
+
+private fun detectMaxRefreshRateHz(context: Context, attachedView: View?): Int {
+    val display = attachedView?.display
+        ?: context.display
+        ?: ContextCompat.getSystemService(context, DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY)
+
+    val refreshRate = when {
+        display == null -> DEFAULT_FPS_LIMITER_MAX_HZ.toFloat()
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
+            val supportedMax = display.supportedModes.maxOfOrNull { it.refreshRate } ?: display.refreshRate
+            if (supportedMax.isFinite() && supportedMax > 0f) supportedMax else display.refreshRate
+        }
+        else -> display.refreshRate
+    }
+
+    return refreshRate
+        .takeIf { it.isFinite() && it > 0f }
+        ?.roundToInt()
+        ?.coerceAtLeast(5)
+        ?: DEFAULT_FPS_LIMITER_MAX_HZ
+}
 
 private data class XServerViewReleaseBinding(
     val xServerView: XServerView,
@@ -506,6 +559,15 @@ fun XServerScreen(
     var hasInternalTouchpad by remember { mutableStateOf(false) }
     var hasUpdatedScreenGamepad by remember { mutableStateOf(false) }
     var isPerformanceHudEnabled by remember { mutableStateOf(PrefManager.showFps) }
+    var detectedMaxRefreshRateHz by remember { mutableIntStateOf(detectMaxRefreshRateHz(context, null)) }
+    var fpsLimiterEnabled by rememberSaveable(container.id) { mutableStateOf(initialFpsLimiterEnabled(container)) }
+    var fpsLimiterTarget by rememberSaveable(container.id) { mutableIntStateOf(initialFpsLimiterTarget(container)) }
+
+    fun persistFpsLimiterState() {
+        container.putExtra(FPS_LIMITER_ENABLED_EXTRA, fpsLimiterEnabled)
+        container.putExtra(FPS_LIMITER_TARGET_EXTRA, fpsLimiterTarget)
+        container.saveData()
+    }
 
     fun loadPerformanceHudConfig(): PerformanceHudConfig {
         return PerformanceHudConfig(
@@ -566,6 +628,39 @@ fun XServerScreen(
         performanceHudConfig = config
         persistPerformanceHudConfig(config)
         performanceHudView?.setConfig(config)
+    }
+
+    fun applyFpsLimiterToEngines(limit: Int) {
+        xServerView?.setFrameRateLimit(limit)
+        xServerView?.getxServer()
+            ?.getExtension<PresentExtension>(PresentExtension.MAJOR_OPCODE.toInt())
+            ?.setFrameRateLimit(limit)
+    }
+
+    fun applyFpsLimiterEnabled(enabled: Boolean) {
+        fpsLimiterEnabled = enabled
+        applyFpsLimiterToEngines(if (enabled) fpsLimiterTarget else 0)
+        persistFpsLimiterState()
+    }
+
+    fun applyFpsLimiterTarget(target: Int) {
+        val sanitized = target.coerceAtLeast(5).coerceAtMost(detectedMaxRefreshRateHz)
+        fpsLimiterTarget = sanitized
+        if (fpsLimiterEnabled) {
+            applyFpsLimiterToEngines(sanitized)
+        }
+        persistFpsLimiterState()
+    }
+
+    LaunchedEffect(xServerView) {
+        val detectedMax = detectMaxRefreshRateHz(context, xServerView)
+        detectedMaxRefreshRateHz = detectedMax
+        val clampedTarget = fpsLimiterTarget.coerceAtMost(detectedMax).coerceAtLeast(5)
+        if (clampedTarget != fpsLimiterTarget) {
+            fpsLimiterTarget = clampedTarget
+        }
+        val appliedLimit = if (fpsLimiterEnabled) clampedTarget else 0
+        applyFpsLimiterToEngines(appliedLimit)
     }
 
     fun restorePerformanceHudPosition() {
@@ -1487,6 +1582,7 @@ fun XServerScreen(
                 xServerToUse,
             ).apply {
                 xServerView = this
+                setFrameRateLimit(if (fpsLimiterEnabled) fpsLimiterTarget else 0)
                 val renderer = this.renderer
                 renderer.isCursorVisible = false
                 getxServer().renderer = renderer
@@ -2149,7 +2245,12 @@ fun XServerScreen(
             renderer = xServerView?.renderer,
             isPerformanceHudEnabled = isPerformanceHudEnabled,
             performanceHudConfig = performanceHudConfig,
+            fpsLimiterEnabled = fpsLimiterEnabled,
+            fpsLimiterTarget = fpsLimiterTarget,
+            fpsLimiterMax = detectedMaxRefreshRateHz,
             onPerformanceHudConfigChanged = ::applyPerformanceHudConfig,
+            onFpsLimiterEnabledChanged = ::applyFpsLimiterEnabled,
+            onFpsLimiterChanged = ::applyFpsLimiterTarget,
             hasPhysicalController = hasPhysicalController,
             activeToggleIds = buildSet {
                 if (areControlsVisible) add(QuickMenuAction.INPUT_CONTROLS)
