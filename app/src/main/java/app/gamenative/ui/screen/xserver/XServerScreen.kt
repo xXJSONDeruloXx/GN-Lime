@@ -66,6 +66,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.gamenative.R
 import app.gamenative.ui.util.SnackbarManager
+import app.gamenative.ui.util.applyScreenEffectsConfig
+import app.gamenative.ui.util.loadScreenEffectsConfig
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -665,6 +667,12 @@ fun XServerScreen(
         }
         val appliedLimit = if (fpsLimiterEnabled) clampedTarget else 0
         applyFpsLimiterToEngines(appliedLimit)
+    }
+
+    LaunchedEffect(xServerView?.renderer) {
+        xServerView?.renderer?.let { renderer ->
+            applyScreenEffectsConfig(renderer, loadScreenEffectsConfig(container))
+        }
     }
 
     fun restorePerformanceHudPosition() {
@@ -2247,6 +2255,7 @@ fun XServerScreen(
             onDismiss = dismissOverlayMenu,
             onItemSelected = onQuickMenuItemSelected,
             renderer = xServerView?.renderer,
+            container = container,
             isPerformanceHudEnabled = isPerformanceHudEnabled,
             performanceHudConfig = performanceHudConfig,
             fpsLimiterEnabled = fpsLimiterEnabled,
