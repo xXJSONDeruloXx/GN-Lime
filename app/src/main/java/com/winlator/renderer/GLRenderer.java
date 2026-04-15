@@ -5,6 +5,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
+import android.opengl.GLUtils;
 import android.view.View;
 
 // import com.winlator.R;
@@ -14,6 +15,7 @@ import com.winlator.math.Mathf;
 import com.winlator.math.XForm;
 import com.winlator.renderer.material.CursorMaterial;
 import com.winlator.renderer.material.ShaderMaterial;
+import com.winlator.renderer.material.ShadowMaterial;
 import com.winlator.renderer.material.WindowMaterial;
 import com.winlator.widget.FrameRating;
 import com.winlator.widget.XServerView;
@@ -40,6 +42,7 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
     private final float[] tmpXForm2 = XForm.getInstance();
     private final CursorMaterial cursorMaterial = new CursorMaterial();
     private final WindowMaterial windowMaterial = new WindowMaterial();
+    private final ShadowMaterial shadowMaterial = new ShadowMaterial();
     public final ViewTransformation viewTransformation = new ViewTransformation();
     private final Drawable rootCursorDrawable;
     private final ArrayList<RenderableWindow> renderableWindows = new ArrayList<>();
@@ -58,6 +61,9 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
     private int renderTargetHeightOverride = 0;
     private boolean sceneInitialized = false;
     private final EffectComposer effectComposer;
+    private Bitmap backdropBitmap;
+    private int backdropTextureId = 0;
+    private boolean backdropTextureDirty = false;
     private FrameRating frameRating;
 
     public GLRenderer(XServerView xServerView, XServer xServer) {
@@ -100,6 +106,8 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
                 if (d != null) d.getTexture().invalidate(); // sets textureId=0 so next draw re-creates
             }
             rootCursorDrawable.getTexture().invalidate();
+            backdropTextureId = 0;
+            backdropTextureDirty = backdropBitmap != null;
         }
         updateScene();
         xServerView.requestRender();
@@ -153,21 +161,18 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         float viewportScaleY = surfaceHeight > 0 ? (float) targetHeight / (float) surfaceHeight : 1.0f;
 
         if (viewportNeedsUpdate) {
-            if (renderingToOffscreenTarget || fullscreen) {
-                GLES20.glViewport(0, 0, targetWidth, targetHeight);
-            }
-            else if (magnifierEnabled) {
-                GLES20.glViewport(
-                    Math.round(viewTransformation.viewOffsetX * viewportScaleX),
-                    Math.round(viewTransformation.viewOffsetY * viewportScaleY),
-                    Math.round(viewTransformation.viewWidth * viewportScaleX),
-                    Math.round(viewTransformation.viewHeight * viewportScaleY)
-                );
+            if (renderingToOffscreenTarget || fullscreen || magnifierEnabled) {
+                applyCurrentViewport(targetWidth, targetHeight, renderingToOffscreenTarget, viewportScaleX, viewportScaleY);
             }
             viewportNeedsUpdate = false;
         }
 
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+        renderBackdrop(targetWidth, targetHeight);
+        renderViewportShadow(targetWidth, targetHeight, viewportScaleX, viewportScaleY);
+        if (magnifierEnabled) {
+            applyCurrentViewport(targetWidth, targetHeight, renderingToOffscreenTarget, viewportScaleX, viewportScaleY);
+        }
 
         if (renderingToOffscreenTarget) {
             GLES20.glDisable(GLES20.GL_SCISSOR_TEST);
@@ -293,6 +298,117 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         }
     }
 
+    private void applyCurrentViewport(int targetWidth, int targetHeight, boolean renderingToOffscreenTarget, float viewportScaleX, float viewportScaleY) {
+        if (renderingToOffscreenTarget || fullscreen) {
+            GLES20.glViewport(0, 0, targetWidth, targetHeight);
+        }
+        else {
+            GLES20.glViewport(
+                    Math.round(viewTransformation.viewOffsetX * viewportScaleX),
+                    Math.round(viewTransformation.viewOffsetY * viewportScaleY),
+                    Math.round(viewTransformation.viewWidth * viewportScaleX),
+                    Math.round(viewTransformation.viewHeight * viewportScaleY)
+            );
+        }
+    }
+
+    private void ensureBackdropTexture() {
+        if (backdropBitmap == null) return;
+
+        if (backdropTextureId == 0) {
+            int[] textureIds = new int[1];
+            GLES20.glGenTextures(1, textureIds, 0);
+            backdropTextureId = textureIds[0];
+            backdropTextureDirty = true;
+        }
+
+        if (!backdropTextureDirty) return;
+
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, backdropTextureId);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, backdropBitmap, 0);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
+        backdropTextureDirty = false;
+    }
+
+    private void deleteBackdropTexture() {
+        if (backdropTextureId == 0) return;
+        int[] textureIds = new int[]{backdropTextureId};
+        GLES20.glDeleteTextures(1, textureIds, 0);
+        backdropTextureId = 0;
+    }
+
+    private void renderBackdrop(int targetWidth, int targetHeight) {
+        if (backdropBitmap == null || targetWidth <= 0 || targetHeight <= 0) return;
+
+        ensureBackdropTexture();
+        if (backdropTextureId == 0) return;
+
+        GLES20.glViewport(0, 0, targetWidth, targetHeight);
+        windowMaterial.use();
+        GLES20.glUniform2f(windowMaterial.getUniformLocation("viewSize"), targetWidth, targetHeight);
+        quadVertices.bind(windowMaterial.programId);
+
+        float scale = Math.max((float) targetWidth / backdropBitmap.getWidth(), (float) targetHeight / backdropBitmap.getHeight());
+        float drawWidth = backdropBitmap.getWidth() * scale;
+        float drawHeight = backdropBitmap.getHeight() * scale;
+        float drawX = (targetWidth - drawWidth) * 0.5f;
+        float drawY = (targetHeight - drawHeight) * 0.5f;
+
+        XForm.set(tmpXForm1, drawX, drawY, drawWidth, drawHeight);
+
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, backdropTextureId);
+        GLES20.glUniform1i(windowMaterial.getUniformLocation("texture"), 0);
+        GLES20.glUniform1fv(windowMaterial.getUniformLocation("xform"), tmpXForm1.length, tmpXForm1, 0);
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, quadVertices.count());
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
+
+        quadVertices.disable();
+    }
+
+    private void renderShadowQuad(float x, float y, float width, float height, float leftWeight, float rightWeight, float topWeight, float bottomWeight, float alpha) {
+        if (width <= 0.0f || height <= 0.0f || alpha <= 0.0f) return;
+
+        XForm.set(tmpXForm1, x, y, width, height);
+        shadowMaterial.setUniformVec4("edgeWeights", leftWeight, rightWeight, topWeight, bottomWeight);
+        shadowMaterial.setUniformFloat("shadowAlpha", alpha);
+        GLES20.glUniform1fv(shadowMaterial.getUniformLocation("xform"), tmpXForm1.length, tmpXForm1, 0);
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, quadVertices.count());
+    }
+
+    private void renderViewportShadow(int targetWidth, int targetHeight, float viewportScaleX, float viewportScaleY) {
+        if (fullscreen || targetWidth <= 0 || targetHeight <= 0) return;
+
+        float scaledViewWidth = viewTransformation.viewWidth * viewportScaleX;
+        float scaledViewHeight = viewTransformation.viewHeight * viewportScaleY;
+        if (scaledViewWidth >= targetWidth && scaledViewHeight >= targetHeight) return;
+
+        float sideShadowSize = Math.max(22.0f * viewportScaleX, 34.0f * viewTransformation.aspect * viewportScaleX);
+        float verticalShadowSize = Math.max(26.0f * viewportScaleY, 42.0f * viewTransformation.aspect * viewportScaleY);
+        float sideShadowAlpha = 0.50f;
+        float verticalShadowAlpha = 0.58f;
+        float left = viewTransformation.viewOffsetX * viewportScaleX;
+        float top = viewTransformation.viewOffsetY * viewportScaleY;
+        float right = left + scaledViewWidth;
+        float bottom = top + scaledViewHeight;
+
+        GLES20.glViewport(0, 0, targetWidth, targetHeight);
+        shadowMaterial.use();
+        shadowMaterial.setUniformVec2("viewSize", targetWidth, targetHeight);
+        quadVertices.bind(shadowMaterial.programId);
+
+        renderShadowQuad(left - sideShadowSize, top, sideShadowSize, scaledViewHeight, 1.0f, 0.0f, 0.0f, 0.0f, sideShadowAlpha);
+        renderShadowQuad(right, top, sideShadowSize, scaledViewHeight, 0.0f, 1.0f, 0.0f, 0.0f, sideShadowAlpha);
+        renderShadowQuad(left, top - verticalShadowSize, scaledViewWidth, verticalShadowSize, 0.0f, 0.0f, 1.0f, 0.0f, verticalShadowAlpha);
+        renderShadowQuad(left, bottom, scaledViewWidth, verticalShadowSize, 0.0f, 0.0f, 0.0f, 1.0f, verticalShadowAlpha);
+
+        quadVertices.disable();
+    }
+
     private void renderWindows() {
         windowMaterial.use();
         GLES20.glUniform2f(windowMaterial.getUniformLocation("viewSize"), xServer.screenInfo.width, xServer.screenInfo.height);
@@ -325,6 +441,30 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         }
 
         quadVertices.disable();
+    }
+
+    public void setBackdropBitmap(Bitmap bitmap) {
+        xServerView.queueEvent(() -> {
+            if (backdropBitmap != null && backdropBitmap != bitmap && !backdropBitmap.isRecycled()) {
+                backdropBitmap.recycle();
+            }
+            backdropBitmap = bitmap;
+            deleteBackdropTexture();
+            backdropTextureDirty = bitmap != null;
+        });
+        xServerView.requestRender();
+    }
+
+    public void clearBackdrop() {
+        xServerView.queueEvent(() -> {
+            if (backdropBitmap != null && !backdropBitmap.isRecycled()) {
+                backdropBitmap.recycle();
+            }
+            backdropBitmap = null;
+            deleteBackdropTexture();
+            backdropTextureDirty = false;
+        });
+        xServerView.requestRender();
     }
 
     public void toggleFullscreen() {

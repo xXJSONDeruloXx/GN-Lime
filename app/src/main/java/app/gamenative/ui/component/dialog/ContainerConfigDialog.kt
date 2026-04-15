@@ -2,7 +2,9 @@ package app.gamenative.ui.component.dialog
 
 import android.widget.Spinner
 import android.widget.ArrayAdapter
+import android.content.Intent
 import android.content.res.Configuration
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -49,6 +51,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -117,6 +120,86 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 import kotlin.math.roundToInt
+
+private data class BackdropImageController(
+    val launchPicker: () -> Unit,
+    val clearImage: () -> Unit,
+    val dismissWithCleanup: () -> Unit,
+    val saveWithCleanup: () -> Unit,
+)
+
+private fun releaseBackdropPermission(context: android.content.Context, uriString: String) {
+    if (uriString.isBlank()) return
+    try {
+        context.contentResolver.releasePersistableUriPermission(
+            Uri.parse(uriString),
+            Intent.FLAG_GRANT_READ_URI_PERMISSION,
+        )
+    } catch (_: SecurityException) {
+        // Ignore if no persisted grant exists for this Uri.
+    }
+}
+
+private fun clearUnsavedBackdropPermission(
+    context: android.content.Context,
+    initialBackdropImageUri: String,
+    currentUri: String,
+) {
+    if (currentUri.isNotBlank() && currentUri != initialBackdropImageUri) {
+        releaseBackdropPermission(context, currentUri)
+    }
+}
+
+@Composable
+private fun rememberBackdropImageController(
+    context: android.content.Context,
+    initialBackdropImageUri: String,
+    configState: MutableState<ContainerData>,
+    onDismissRequest: () -> Unit,
+    onSave: (ContainerData) -> Unit,
+): BackdropImageController {
+    var config by configState
+
+    val backdropImagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        val newUri = uri.toString()
+        val previousUri = config.backdropImageUri
+        if (previousUri.isNotBlank() && previousUri != initialBackdropImageUri && previousUri != newUri) {
+            releaseBackdropPermission(context, previousUri)
+        }
+        try {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        } catch (_: SecurityException) {
+            // Some providers don't support persistable permissions; best-effort only.
+        }
+        config = config.copy(backdropImageUri = newUri)
+    }
+
+    return BackdropImageController(
+        launchPicker = {
+            backdropImagePickerLauncher.launch(arrayOf("image/*"))
+        },
+        clearImage = {
+            clearUnsavedBackdropPermission(context, initialBackdropImageUri, config.backdropImageUri)
+            config = config.copy(backdropImageUri = "")
+        },
+        dismissWithCleanup = {
+            clearUnsavedBackdropPermission(context, initialBackdropImageUri, config.backdropImageUri)
+            onDismissRequest()
+        },
+        saveWithCleanup = {
+            if (config.backdropImageUri != initialBackdropImageUri && initialBackdropImageUri.isNotBlank()) {
+                releaseBackdropPermission(context, initialBackdropImageUri)
+            }
+            onSave(config)
+        },
+    )
+}
 
 /**
  * Gets the component title for Win Components settings group.
@@ -832,6 +915,15 @@ fun ContainerConfigDialog(
             contract = ActivityResultContracts.RequestMultiplePermissions(),
         ) { }
 
+        val initialBackdropImageUri = initialConfig.backdropImageUri
+        val backdropImageController = rememberBackdropImageController(
+            context = context,
+            initialBackdropImageUri = initialBackdropImageUri,
+            configState = configState,
+            onDismissRequest = onDismissRequest,
+            onSave = onSave,
+        )
+
         val folderPicker = rememberCustomGameFolderPicker(
             onPathSelected = { path ->
                 SteamService.keepAlive = false
@@ -1016,6 +1108,7 @@ fun ContainerConfigDialog(
             gpuExtensions = gpuExtensions,
             inspectionMode = inspectionMode,
             isBionicVariant = isBionicVariant,
+            isDefaultConfig = default,
             nonDeletableDriveLetters = nonDeletableDriveLetters,
             availableDriveLetters = availableDriveLetters,
             launchManifestInstall = { entry, label, isDriver, expectedType, onInstalled ->
@@ -1032,6 +1125,8 @@ fun ContainerConfigDialog(
                 SteamService.keepAlive = true
                 folderPicker.launchPicker()
             },
+            launchBackdropImagePicker = backdropImageController.launchPicker,
+            clearBackdropImage = backdropImageController.clearImage,
             getVersionsForDriver = { getVersionsForDriver() },
             getVersionsForBox64 = { getVersionsForBox64() },
             applyScreenSizeToConfig = applyScreenSizeToConfig,
@@ -1053,95 +1148,121 @@ fun ContainerConfigDialog(
             dismissBtnText = dismissDialogState.dismissBtnText,
             onDismissRequest = { dismissDialogState = MessageDialogState(visible = false) },
             onDismissClick = { dismissDialogState = MessageDialogState(visible = false) },
-            onConfirmClick = onDismissRequest,
+            onConfirmClick = backdropImageController.dismissWithCleanup,
         )
 
-        Dialog(
-            onDismissRequest = onDismissCheck,
-            properties = DialogProperties(
-                usePlatformDefaultWidth = false,
-                dismissOnClickOutside = false,
-            ),
-            content = {
-                val scrollState = rememberScrollState()
+        ContainerConfigDialogScaffold(
+            title = title,
+            initialConfig = initialConfig,
+            config = config,
+            state = state,
+            default = default,
+            onDismissCheck = onDismissCheck,
+            onSaveClick = backdropImageController.saveWithCleanup,
+            nonzeroResolutionError = nonzeroResolutionError,
+            aspectResolutionError = aspectResolutionError,
+        )
+    }
+}
 
-                Scaffold(
-                    modifier = Modifier.fillMaxSize(),
-                    topBar = {
-                        CenterAlignedTopAppBar(
-                            title = {
-                                Text(
-                                    text = "$title${if (initialConfig != config) "*" else ""}",
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            },
-                            navigationIcon = {
-                                IconButton(
-                                    onClick = onDismissCheck,
-                                    content = { Icon(Icons.Default.Close, null) },
-                                )
-                            },
-                            actions = {
-                                IconButton(
-                                    onClick = { onSave(config) },
-                                    content = { Icon(Icons.Default.Save, null) },
-                                )
-                            },
-                        )
-                    },
-                ) { paddingValues ->
-                    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
-                    val tabs = listOf(
-                        stringResource(R.string.container_config_tab_general),
-                        stringResource(R.string.container_config_tab_graphics),
-                        stringResource(R.string.container_config_tab_emulation),
-                        stringResource(R.string.container_config_tab_controller),
-                        stringResource(R.string.container_config_tab_wine),
-                        stringResource(R.string.container_config_tab_win_components),
-                        stringResource(R.string.container_config_tab_environment),
-                        stringResource(R.string.container_config_tab_drives),
-                        stringResource(R.string.container_config_tab_advanced)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ContainerConfigDialogScaffold(
+    title: String,
+    initialConfig: ContainerData,
+    config: ContainerData,
+    state: ContainerConfigState,
+    default: Boolean,
+    onDismissCheck: () -> Unit,
+    onSaveClick: () -> Unit,
+    nonzeroResolutionError: String,
+    aspectResolutionError: String,
+) {
+    Dialog(
+        onDismissRequest = onDismissCheck,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnClickOutside = false,
+        ),
+        content = {
+            val scrollState = rememberScrollState()
+
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                topBar = {
+                    CenterAlignedTopAppBar(
+                        title = {
+                            Text(
+                                text = "$title${if (initialConfig != config) "*" else ""}",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        navigationIcon = {
+                            IconButton(
+                                onClick = onDismissCheck,
+                                content = { Icon(Icons.Default.Close, null) },
+                            )
+                        },
+                        actions = {
+                            IconButton(
+                                onClick = onSaveClick,
+                                content = { Icon(Icons.Default.Save, null) },
+                            )
+                        },
                     )
+                },
+            ) { paddingValues ->
+                var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+                val tabs = listOf(
+                    stringResource(R.string.container_config_tab_general),
+                    stringResource(R.string.container_config_tab_graphics),
+                    stringResource(R.string.container_config_tab_emulation),
+                    stringResource(R.string.container_config_tab_controller),
+                    stringResource(R.string.container_config_tab_wine),
+                    stringResource(R.string.container_config_tab_win_components),
+                    stringResource(R.string.container_config_tab_environment),
+                    stringResource(R.string.container_config_tab_drives),
+                    stringResource(R.string.container_config_tab_advanced),
+                )
+                Column(
+                    modifier = Modifier
+                        .padding(
+                            top = app.gamenative.utils.PaddingUtils.statusBarAwarePadding().calculateTopPadding() + paddingValues.calculateTopPadding(),
+                            bottom = 32.dp + paddingValues.calculateBottomPadding(),
+                            start = paddingValues.calculateStartPadding(LayoutDirection.Ltr),
+                            end = paddingValues.calculateEndPadding(LayoutDirection.Ltr),
+                        )
+                        .fillMaxSize(),
+                ) {
+                    androidx.compose.material3.ScrollableTabRow(selectedTabIndex = selectedTab, edgePadding = 0.dp) {
+                        tabs.forEachIndexed { index, label ->
+                            androidx.compose.material3.Tab(
+                                selected = selectedTab == index,
+                                onClick = { selectedTab = index },
+                                text = { Text(text = label) },
+                            )
+                        }
+                    }
                     Column(
                         modifier = Modifier
-                            .padding(
-                                top = app.gamenative.utils.PaddingUtils.statusBarAwarePadding().calculateTopPadding() + paddingValues.calculateTopPadding(),
-                                bottom = 32.dp + paddingValues.calculateBottomPadding(),
-                                start = paddingValues.calculateStartPadding(LayoutDirection.Ltr),
-                                end = paddingValues.calculateEndPadding(LayoutDirection.Ltr),
-                            )
-                            .fillMaxSize(),
+                            .verticalScroll(scrollState)
+                            .weight(1f),
                     ) {
-                        androidx.compose.material3.ScrollableTabRow(selectedTabIndex = selectedTab, edgePadding = 0.dp) {
-                            tabs.forEachIndexed { index, label ->
-                                androidx.compose.material3.Tab(
-                                    selected = selectedTab == index,
-                                    onClick = { selectedTab = index },
-                                    text = { Text(text = label) },
-                                )
-                            }
-                        }
-                        Column(
-                            modifier = Modifier
-                                .verticalScroll(scrollState)
-                                .weight(1f),
-                        ) {
-                            if (selectedTab == 0) GeneralTabContent(state, nonzeroResolutionError, aspectResolutionError)
-                            if (selectedTab == 1) GraphicsTabContent(state)
-                            if (selectedTab == 2) EmulationTabContent(state)
-                            if (selectedTab == 3) ControllerTabContent(state, default)
-                            if (selectedTab == 4) WineTabContent(state)
-                            if (selectedTab == 5) WinComponentsTabContent(state)
-                            if (selectedTab == 6) EnvironmentTabContent(state)
-                            if (selectedTab == 7) DrivesTabContent(state)
-                            if (selectedTab == 8) AdvancedTabContent(state)
-                        }
+                        if (selectedTab == 0) GeneralTabContent(state, nonzeroResolutionError, aspectResolutionError)
+                        if (selectedTab == 1) GraphicsTabContent(state)
+                        if (selectedTab == 2) EmulationTabContent(state)
+                        if (selectedTab == 3) ControllerTabContent(state, default)
+                        if (selectedTab == 4) WineTabContent(state)
+                        if (selectedTab == 5) WinComponentsTabContent(state)
+                        if (selectedTab == 6) EnvironmentTabContent(state)
+                        if (selectedTab == 7) DrivesTabContent(state)
+                        if (selectedTab == 8) AdvancedTabContent(state)
                     }
                 }
             }
-        )
-    }
+        },
+    )
 }
 
 @Preview(uiMode = Configuration.UI_MODE_NIGHT_YES or Configuration.UI_MODE_TYPE_NORMAL)
