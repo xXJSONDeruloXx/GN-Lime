@@ -244,6 +244,8 @@ fun QuickMenu(
     onFpsLimiterEnabledChanged: (Boolean) -> Unit = {},
     onFpsLimiterChanged: (Int) -> Unit = {},
     hasPhysicalController: Boolean = false,
+    isPerformanceHudHotkeyEnabled: Boolean = false,
+    onPerformanceHudHotkeyToggled: () -> Unit = {},
     activeToggleIds: Set<Int> = emptySet(),
     modifier: Modifier = Modifier,
 ) {
@@ -512,6 +514,8 @@ fun QuickMenu(
                                             onPerformanceHudConfigChanged = onPerformanceHudConfigChanged,
                                             onFpsLimiterEnabledChanged = onFpsLimiterEnabledChanged,
                                             onFpsLimiterChanged = onFpsLimiterChanged,
+                                            isHotkeyEnabled = isPerformanceHudHotkeyEnabled,
+                                            onHotkeyToggled = onPerformanceHudHotkeyToggled,
                                             scrollState = hudScrollState,
                                             focusRequester = hudItemFocusRequester,
                                             modifier = Modifier.fillMaxSize(),
@@ -665,6 +669,8 @@ private fun PerformanceHudQuickMenuTab(
     onPerformanceHudConfigChanged: (PerformanceHudConfig) -> Unit,
     onFpsLimiterEnabledChanged: (Boolean) -> Unit,
     onFpsLimiterChanged: (Int) -> Unit,
+    isHotkeyEnabled: Boolean = false,
+    onHotkeyToggled: () -> Unit = {},
     scrollState: ScrollState,
     focusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
@@ -719,6 +725,14 @@ private fun PerformanceHudQuickMenuTab(
             subtitle = stringResource(R.string.performance_hud_description),
             enabled = isPerformanceHudEnabled,
             onToggle = onTogglePerformanceHud,
+            accentColor = accentColor,
+        )
+
+        QuickMenuToggleRow(
+            title = stringResource(R.string.performance_hud_hotkey_toggle),
+            subtitle = stringResource(R.string.performance_hud_hotkey_description),
+            enabled = isHotkeyEnabled,
+            onToggle = onHotkeyToggled,
             accentColor = accentColor,
         )
 

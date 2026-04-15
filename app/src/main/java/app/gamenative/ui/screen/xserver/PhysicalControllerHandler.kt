@@ -23,7 +23,9 @@ import java.util.TimerTask
 class PhysicalControllerHandler(
     private var profile: ControlsProfile?,
     private val xServer: XServer?,
-    private val onOpenNavigationMenu: (() -> Unit)? = null
+    private val onOpenNavigationMenu: (() -> Unit)? = null,
+    private val onTogglePerformanceHud: (() -> Unit)? = null,
+    private val isPerformanceHudHotkeyEnabled: () -> Boolean = { false },
 ) {
     private val TAG = "gncontrol"
     private val mouseMoveOffset = PointF(0f, 0f)
@@ -31,6 +33,18 @@ class PhysicalControllerHandler(
     // track which axis keycodes are currently "pressed" so we only release on actual transitions.
     // accessed only from main thread (MotionEvent dispatch + Compose lifecycle), no sync needed.
     private val activeAxisBindings = mutableSetOf<Int>()
+
+    // Track currently-held gamepad buttons for combo detection
+    private val heldButtons = mutableSetOf<Int>()
+
+    companion object {
+        private val COMBO_KEYCODES = setOf(
+            KeyEvent.KEYCODE_BUTTON_START,
+            KeyEvent.KEYCODE_BUTTON_SELECT,
+            KeyEvent.KEYCODE_BUTTON_L1,
+            KeyEvent.KEYCODE_BUTTON_R1,
+        )
+    }
 
     private fun releaseActiveAxes() {
         val controller = profile?.getController("*") ?: return
@@ -70,6 +84,18 @@ class PhysicalControllerHandler(
      * Extracted from InputControlsView.onKeyEvent()
      */
     fun onKeyEvent(event: KeyEvent): Boolean {
+        // Perf HUD hotkey combo detection
+        if (event.repeatCount == 0 && event.keyCode in COMBO_KEYCODES) {
+            if (event.action == KeyEvent.ACTION_DOWN) heldButtons.add(event.keyCode)
+            else if (event.action == KeyEvent.ACTION_UP) heldButtons.remove(event.keyCode)
+
+            if (heldButtons.containsAll(COMBO_KEYCODES) && isPerformanceHudHotkeyEnabled()) {
+                heldButtons.clear()
+                onTogglePerformanceHud?.invoke()
+                return true // consume all four buttons
+            }
+        }
+
         if (profile != null && event.repeatCount == 0) {
             val controller = profile?.getController(event.deviceId)
             if (controller != null) {
